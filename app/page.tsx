@@ -17,7 +17,7 @@ export default function PokerDashboard() {
 
   // Formularze
   const [authForm, setAuthForm] = useState({ email: '', password: '' });
-  const [addForm, setAddForm] = useState({ name: '', buyIn: '', markup: '1.0', sold: '0' });
+  const [addForm, setAddForm] = useState({ name: '', buyIn: '', markup: '1.0', sold: '0', scheduledDate: '' });
 
   useEffect(() => {
     checkUser();
@@ -31,7 +31,6 @@ export default function PokerDashboard() {
 
   const loadInitialData = async () => {
     let currentBR = 102.76;
-    // Pobieramy bankroll startowy z bazy
     const { data: setItem } = await supabase.from('settings').select('*').eq('id', 'start_bankroll').single();
     if (setItem) {
       currentBR = Number(setItem.value);
@@ -68,7 +67,6 @@ export default function PokerDashboard() {
             if(win > 0) cashed++;
         }
 
-        // Rysujemy całkowity bankroll, nie tylko profit
         return { name: index + 1, bankroll: Number((baseBR + currentProfit).toFixed(2)) };
       });
 
@@ -79,7 +77,6 @@ export default function PokerDashboard() {
         itm: finishedCount > 0 ? (cashed / finishedCount) * 100 : 0,
         count: finishedCount
       });
-      // Punkt zerowy wykresu to nasz startowy bankroll
       setChartData([{ name: 0, bankroll: baseBR }, ...processedChart]);
     }
   };
@@ -97,16 +94,21 @@ export default function PokerDashboard() {
   const addTournament = async () => {
     if (!addForm.name || !addForm.buyIn) return alert("Podaj nazwę i wpisowe!");
     const { error } = await supabase.from('tournaments').insert([{ 
-      name: addForm.name, buy_in: parseFloat(addForm.buyIn), markup: parseFloat(addForm.markup), max_sell_percent: parseFloat(addForm.sold), is_finished: false 
+      name: addForm.name, 
+      buy_in: parseFloat(addForm.buyIn), 
+      markup: parseFloat(addForm.markup), 
+      max_sell_percent: parseFloat(addForm.sold), 
+      scheduled_date: addForm.scheduledDate ? new Date(addForm.scheduledDate).toISOString() : null,
+      is_finished: false 
     }]);
     if (!error) {
-      setAddForm({ name: '', buyIn: '', markup: '1.0', sold: '0' });
+      setAddForm({ name: '', buyIn: '', markup: '1.0', sold: '0', scheduledDate: '' });
       fetchData(startBankroll);
     }
   };
 
   const settleTournament = async (id: string) => {
-    const amount = prompt("Ile ŁĄCZNIE wygrałeś w tym turnieju? (Wpisz 0 jeśli odpadłeś)\n*System sam odliczy dolę dla inwestorów.*");
+    const amount = prompt("Ile ŁĄCZNIE wygrałeś w tym turnieju? (Wpisz 0 jeśli odpadłeś)");
     if (amount === null) return;
     const { error } = await supabase.from('tournaments').update({ winnings: parseFloat(amount), is_finished: true }).eq('id', id);
     if (!error) fetchData(startBankroll);
@@ -130,8 +132,8 @@ export default function PokerDashboard() {
         {/* TOP BAR */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-10">
           <div>
-            <h1 className="text-4xl font-black text-yellow-500 tracking-tighter uppercase italic">BRTracker</h1>
-            <p className="text-gray-500 text-sm">Rulezz</p>
+            <h1 className="text-4xl font-black text-yellow-500 tracking-tighter uppercase italic">BR Challenge PRO</h1>
+            <p className="text-gray-500 text-sm">Twój realny zysk (Bankroll)</p>
           </div>
 
           {!isAdmin ? (
@@ -150,12 +152,10 @@ export default function PokerDashboard() {
           <StatBox label="Twój Zysk Netto" value={`$${stats.profit.toFixed(2)}`} sub={`${stats.count} gier`} color={stats.profit >= 0 ? "text-green-400" : "text-red-500"} />
           <StatBox label="ROI %" value={`${stats.roi.toFixed(1)}%`} sub="Z Twojego wkładu" color="text-yellow-500" />
           <StatBox label="Skuteczność ITM" value={`${stats.itm.toFixed(1)}%`} sub="In The Money" color="text-blue-400" />
-          
           <div className="bg-[#0f0f0f] border border-gray-800 p-5 rounded-3xl shadow-xl flex flex-col justify-between">
             <div>
               <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 flex justify-between items-center">
-                Bankroll 
-                {isAdmin && <button onClick={handleEditBankroll} className="text-yellow-500 hover:text-yellow-400 text-sm">✏️</button>}
+                Bankroll {isAdmin && <button onClick={handleEditBankroll} className="text-yellow-500 hover:text-yellow-400 text-sm">✏️</button>}
               </p>
               <p className="text-2xl font-black text-white">${(startBankroll + stats.profit).toFixed(2)}</p>
             </div>
@@ -177,7 +177,6 @@ export default function PokerDashboard() {
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1f1f1f" vertical={false} />
                 <XAxis dataKey="name" stroke="#444" fontSize={10} tickLine={false} axisLine={false} />
-                {/* Oś Y dostosowuje się automatycznie, żeby wykres latał góra-dół zamiast stać w miejscu */}
                 <YAxis stroke="#444" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(value) => `$${value}`} domain={['auto', 'auto']} />
                 <Tooltip contentStyle={{ backgroundColor: '#111', border: '1px solid #333', borderRadius: '10px' }} itemStyle={{ color: '#f59e0b', fontWeight: 'bold' }} />
                 <Area type="monotone" dataKey="bankroll" stroke="#f59e0b" strokeWidth={3} fillOpacity={1} fill="url(#colorProfit)" />
@@ -189,25 +188,36 @@ export default function PokerDashboard() {
         {/* LISTA I ADMIN */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2">
-            <h3 className="text-xl font-bold mb-4 flex items-center gap-2">📋 Historia Turniejów</h3>
+            <h3 className="text-xl font-bold mb-4 flex items-center gap-2">📋 Oferta & Historia</h3>
             <div className="space-y-3">
               {tournaments.map((t) => {
                 const myCost = t.buy_in - (t.buy_in * (t.max_sell_percent / 100) * t.markup);
                 const kept = 100 - t.max_sell_percent;
                 const myWin = t.winnings * (kept / 100);
                 const net = t.is_finished ? (myWin - myCost) : 0;
+                
+                // Sprawdzamy status na podstawie daty
+                const isIncoming = !t.is_finished && t.scheduled_date && new Date(t.scheduled_date) > new Date();
 
                 return (
                   <div key={t.id} className="bg-[#0f0f0f] border border-gray-800 p-4 rounded-2xl flex justify-between items-center hover:bg-[#151515] transition">
                     <div>
-                      <span className="text-[10px] text-gray-500 font-mono uppercase">{new Date(t.created_at).toLocaleDateString()}</span>
-                      <h4 className="font-bold text-gray-200">{t.name}</h4>
+                      {t.scheduled_date ? (
+                        <span className="text-[10px] text-yellow-500 font-mono uppercase font-bold tracking-wider">
+                          📅 {new Date(t.scheduled_date).toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-gray-500 font-mono uppercase">{new Date(t.created_at).toLocaleDateString()}</span>
+                      )}
+                      
+                      <h4 className="font-bold text-gray-200 mt-1">{t.name}</h4>
                       <div className="flex gap-2 text-[11px] text-gray-500 mt-1">
                         <span>BI: ${t.buy_in}</span>
                         <span>| Sprzedane: {t.max_sell_percent}% (MU: {t.markup})</span>
                         <span className="text-yellow-500 font-bold">| Dla Cb: {kept}%</span>
                       </div>
                     </div>
+                    
                     <div className="text-right flex items-center gap-3">
                       <div>
                         {t.is_finished ? (
@@ -217,8 +227,10 @@ export default function PokerDashboard() {
                               {net > 0 ? '+' : ''}${net.toFixed(2)}
                             </span>
                           </div>
+                        ) : isIncoming ? (
+                          <span className="text-[10px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-1 rounded-lg uppercase font-bold tracking-widest">Wkrótce</span>
                         ) : (
-                          <span className="text-[10px] bg-yellow-500/10 text-yellow-500 px-2 py-1 rounded-full uppercase font-bold animate-pulse">W grze</span>
+                          <span className="text-[10px] bg-yellow-500/10 text-yellow-500 border border-yellow-500/20 px-2 py-1 rounded-lg uppercase font-bold animate-pulse tracking-widest">W grze</span>
                         )}
                       </div>
                       
@@ -237,7 +249,7 @@ export default function PokerDashboard() {
             </div>
           </div>
 
-          {/* SZYBKIE DODAWANIE (Tylko Admin) */}
+          {/* SZYBKIE DODAWANIE */}
           <div>
             {isAdmin && (
                 <div className="bg-yellow-500 p-6 rounded-3xl text-black sticky top-8 shadow-2xl">
@@ -256,12 +268,26 @@ export default function PokerDashboard() {
                           </div>
                         </div>
 
-                        <div>
-                          <label className="text-[10px] font-bold uppercase text-black/60 ml-1">Ile % sprzedajesz?</label>
-                          <div className="flex items-center bg-black/10 border border-black/20 rounded-xl p-1">
-                            <input type="number" min="0" max="100" placeholder="0" value={addForm.sold} onChange={e => setAddForm({...addForm, sold: e.target.value})} className="w-full p-2 bg-transparent outline-none font-bold text-center" />
-                            <span className="pr-3 font-black">%</span>
+                        <div className="grid grid-cols-2 gap-3 items-end">
+                          <div>
+                            <label className="text-[10px] font-bold uppercase text-black/60 ml-1">Zostawiasz dla sb</label>
+                            <div className="flex items-center bg-black/10 border border-black/20 rounded-xl p-1">
+                              <input type="number" min="0" max="100" value={100 - Number(addForm.sold)} disabled className="w-full p-2 bg-transparent text-black/50 outline-none font-bold text-center" />
+                              <span className="pr-3 font-black text-black/50">%</span>
+                            </div>
                           </div>
+                          <div>
+                            <label className="text-[10px] font-bold uppercase text-black/60 ml-1">Sprzedajesz</label>
+                            <div className="flex items-center bg-black border border-black/20 rounded-xl p-1 shadow-inner">
+                              <input type="number" min="0" max="100" placeholder="0" value={addForm.sold} onChange={e => setAddForm({...addForm, sold: e.target.value})} className="w-full p-2 bg-transparent outline-none font-bold text-center text-yellow-500" />
+                              <span className="pr-3 font-black text-yellow-500">%</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-bold uppercase text-black/60 ml-1">Data i start (Opcjonalnie)</label>
+                          <input type="datetime-local" value={addForm.scheduledDate} onChange={e => setAddForm({...addForm, scheduledDate: e.target.value})} className="w-full p-3 rounded-xl bg-black/10 border border-black/20 text-black outline-none font-medium text-sm" />
                         </div>
 
                         <button onClick={addTournament} className="w-full bg-black text-white font-bold py-4 rounded-xl uppercase tracking-tighter hover:scale-[1.02] transition mt-2 shadow-xl">
