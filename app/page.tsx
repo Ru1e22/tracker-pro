@@ -11,16 +11,19 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 export default function PokerDashboard() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [tournaments, setTournaments] = useState<any[]>([]);
+  const [templates, setTemplates] = useState<any[]>([]);
   const [chartData, setChartData] = useState<any[]>([]);
   const [stats, setStats] = useState({ profit: 0, roi: 0, itm: 0, count: 0 });
   const [startBankroll, setStartBankroll] = useState(337.29);
 
-  // Formularze
+  // Formularze i Modale
   const [authForm, setAuthForm] = useState({ email: '', password: '' });
   const [addForm, setAddForm] = useState({ name: '', buyIn: '', markup: '1.0', sold: '0', scheduledDate: '' });
-  
-  // Stan do edycji turnieju
   const [editingTourney, setEditingTourney] = useState<any>(null);
+  
+  // Zarządzanie Szablonami
+  const [showTemplatesModal, setShowTemplatesModal] = useState(false);
+  const [newTemplate, setNewTemplate] = useState({ name: '', buyIn: '' });
 
   useEffect(() => {
     checkUser();
@@ -32,26 +35,36 @@ export default function PokerDashboard() {
     setIsAdmin(!!session);
   };
 
+  const fetchTemplates = async () => {
+    const { data } = await supabase.from('tournament_templates').select('*').order('name', { ascending: true });
+    if (data) setTemplates(data);
+  };
+
   const loadInitialData = async () => {
-    let currentBR = 102.76;
+    let currentBR = 337.29;
     const { data: setItem } = await supabase.from('settings').select('*').eq('id', 'start_bankroll').single();
     if (setItem) {
       currentBR = Number(setItem.value);
       setStartBankroll(currentBR);
     }
     fetchData(currentBR);
+    fetchTemplates();
   };
 
   const fetchData = async (baseBR: number) => {
-    const { data } = await supabase.from('tournaments').select('*').order('created_at', { ascending: true });
+    const { data } = await supabase.from('tournaments').select('*');
     if (data) {
-      setTournaments([...data].reverse());
-      
+      const chronologicalData = [...data].sort((a, b) => {
+        const dateA = a.scheduled_date ? new Date(a.scheduled_date).getTime() : new Date(a.created_at).getTime();
+        const dateB = b.scheduled_date ? new Date(b.scheduled_date).getTime() : new Date(b.created_at).getTime();
+        return dateA - dateB;
+      });
+
       let currentProfit = 0;
       let totalMyCost = 0;
       let cashed = 0;
       
-      const processedChart = data.map((t, index) => {
+      const processedChart = chronologicalData.map((t, index) => {
         const win = Number(t.winnings || 0);
         const bi = Number(t.buy_in || 0);
         const mu = Number(t.markup || 1.0);
@@ -73,7 +86,7 @@ export default function PokerDashboard() {
         return { name: index + 1, bankroll: Number((baseBR + currentProfit).toFixed(2)) };
       });
 
-      const finishedCount = data.filter(t => t.is_finished).length;
+      const finishedCount = chronologicalData.filter(t => t.is_finished).length;
       setStats({
         profit: currentProfit,
         roi: totalMyCost > 0 ? (currentProfit / totalMyCost) * 100 : 0,
@@ -81,11 +94,21 @@ export default function PokerDashboard() {
         count: finishedCount
       });
       setChartData([{ name: 0, bankroll: baseBR }, ...processedChart]);
+
+      const sortedForList = [...chronologicalData].sort((a, b) => {
+        if (a.is_finished !== b.is_finished) return a.is_finished ? 1 : -1;
+        const dateA = a.scheduled_date ? new Date(a.scheduled_date).getTime() : new Date(a.created_at).getTime();
+        const dateB = b.scheduled_date ? new Date(b.scheduled_date).getTime() : new Date(b.created_at).getTime();
+        if (!a.is_finished) return dateA - dateB;
+        else return dateB - dateA;
+      });
+
+      setTournaments(sortedForList);
     }
   };
 
   const handleEditBankroll = async () => {
-    const newVal = prompt("Podaj nowy bankroll startowy (np. 150.50):", startBankroll.toString());
+    const newVal = prompt("Podaj nowy bankroll startowy (np. 337.29):", startBankroll.toString());
     if (newVal !== null && !isNaN(Number(newVal))) {
       const val = parseFloat(Number(newVal).toFixed(2));
       await supabase.from('settings').upsert({ id: 'start_bankroll', value: val });
@@ -97,12 +120,8 @@ export default function PokerDashboard() {
   const addTournament = async () => {
     if (!addForm.name || !addForm.buyIn) return alert("Podaj nazwę i wpisowe!");
     const { error } = await supabase.from('tournaments').insert([{ 
-      name: addForm.name, 
-      buy_in: parseFloat(addForm.buyIn), 
-      markup: parseFloat(addForm.markup), 
-      max_sell_percent: parseFloat(addForm.sold), 
-      scheduled_date: addForm.scheduledDate ? new Date(addForm.scheduledDate).toISOString() : null,
-      is_finished: false 
+      name: addForm.name, buy_in: parseFloat(addForm.buyIn), markup: parseFloat(addForm.markup), 
+      max_sell_percent: parseFloat(addForm.sold), scheduled_date: addForm.scheduledDate ? new Date(addForm.scheduledDate).toISOString() : null, is_finished: false 
     }]);
     if (!error) {
       setAddForm({ name: '', buyIn: '', markup: '1.0', sold: '0', scheduledDate: '' });
@@ -110,7 +129,28 @@ export default function PokerDashboard() {
     }
   };
 
-  // Otwieranie modala do edycji z załadowaniem danych
+  const handleTemplateSelect = (e: any) => {
+    const val = e.target.value;
+    const match = templates.find(t => t.name === val);
+    if (match) {
+      setAddForm({ ...addForm, name: val, buyIn: match.default_buy_in.toString() });
+    } else {
+      setAddForm({ ...addForm, name: val });
+    }
+  };
+
+  const saveNewTemplate = async () => {
+    if(!newTemplate.name) return;
+    await supabase.from('tournament_templates').insert([{ name: newTemplate.name, default_buy_in: parseFloat(newTemplate.buyIn || '0') }]);
+    setNewTemplate({ name: '', buyIn: '' });
+    fetchTemplates();
+  };
+
+  const deleteTemplate = async (id: string) => {
+    await supabase.from('tournament_templates').delete().eq('id', id);
+    fetchTemplates();
+  };
+
   const openEditModal = (t: any) => {
     let formattedDate = '';
     if (t.scheduled_date) {
@@ -118,32 +158,19 @@ export default function PokerDashboard() {
       dateObj.setMinutes(dateObj.getMinutes() - dateObj.getTimezoneOffset());
       formattedDate = dateObj.toISOString().slice(0, 16);
     }
-    setEditingTourney({
-      id: t.id,
-      name: t.name,
-      buyIn: t.buy_in,
-      markup: t.markup,
-      sold: t.max_sell_percent,
-      scheduledDate: formattedDate
-    });
+    setEditingTourney({ id: t.id, name: t.name, buyIn: t.buy_in, markup: t.markup, sold: t.max_sell_percent, scheduledDate: formattedDate });
   };
 
-  // Zapisanie edytowanego turnieju
   const updateTournament = async () => {
     const { error } = await supabase.from('tournaments').update({
-      name: editingTourney.name,
-      buy_in: parseFloat(editingTourney.buyIn),
-      markup: parseFloat(editingTourney.markup),
-      max_sell_percent: parseFloat(editingTourney.sold),
-      scheduled_date: editingTourney.scheduledDate ? new Date(editingTourney.scheduledDate).toISOString() : null
+      name: editingTourney.name, buy_in: parseFloat(editingTourney.buyIn), markup: parseFloat(editingTourney.markup),
+      max_sell_percent: parseFloat(editingTourney.sold), scheduled_date: editingTourney.scheduledDate ? new Date(editingTourney.scheduledDate).toISOString() : null
     }).eq('id', editingTourney.id);
 
     if (!error) {
       setEditingTourney(null);
       fetchData(startBankroll);
-    } else {
-      alert("Błąd aktualizacji: " + error.message);
-    }
+    } else alert("Błąd aktualizacji: " + error.message);
   };
 
   const settleTournament = async (id: string) => {
@@ -154,7 +181,7 @@ export default function PokerDashboard() {
   };
 
   const deleteTournament = async (id: string) => {
-    if (!confirm("Na pewno usunąć ten turniej?")) return;
+    if (!confirm("Na pewno usunąć ten turniej z historii?")) return;
     const { error } = await supabase.from('tournaments').delete().eq('id', id);
     if (!error) fetchData(startBankroll);
   };
@@ -167,7 +194,35 @@ export default function PokerDashboard() {
   return (
     <main className="min-h-screen bg-[#050505] text-white p-4 md:p-8 font-sans relative">
       
-      {/* MODAL EDYCJI (Wyświetla się tylko gdy editingTourney nie jest null) */}
+      {/* MODAL ZARZĄDZANIA SZABLONAMI */}
+      {showTemplatesModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-lg shadow-2xl">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="font-black text-xl text-yellow-500 uppercase">Zarządzaj Bazą Turniejów</h3>
+              <button onClick={() => setShowTemplatesModal(false)} className="text-gray-500 hover:text-white font-bold">X</button>
+            </div>
+            
+            <div className="flex gap-2 mb-6 bg-black/50 p-3 rounded-xl border border-gray-800">
+              <input type="text" placeholder="Nazwa nowego..." value={newTemplate.name} onChange={e => setNewTemplate({...newTemplate, name: e.target.value})} className="flex-2 p-2 bg-transparent outline-none text-sm w-full" />
+              <input type="number" placeholder="BI ($)" value={newTemplate.buyIn} onChange={e => setNewTemplate({...newTemplate, buyIn: e.target.value})} className="w-20 p-2 bg-transparent border-l border-gray-800 outline-none text-sm text-center" />
+              <button onClick={saveNewTemplate} className="bg-yellow-500 hover:bg-yellow-400 text-black px-4 rounded-lg font-bold text-xs uppercase transition">Dodaj</button>
+            </div>
+
+            <div className="max-h-64 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
+              {templates.length === 0 && <p className="text-gray-600 text-sm text-center">Brak szablonów w bazie.</p>}
+              {templates.map(t => (
+                <div key={t.id} className="flex justify-between items-center bg-black/30 p-3 rounded-lg border border-gray-800/50">
+                  <span className="text-sm font-medium">{t.name} <span className="text-gray-500 text-xs ml-2">(${t.default_buy_in})</span></span>
+                  <button onClick={() => deleteTemplate(t.id)} className="text-red-500 hover:text-red-400 font-bold text-xs">Usuń</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL EDYCJI TURNIEJU (Aktywnego) */}
       {editingTourney && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
           <div className="bg-[#111] border border-yellow-500/30 p-6 rounded-3xl w-full max-w-md shadow-2xl shadow-yellow-500/10">
@@ -198,7 +253,6 @@ export default function PokerDashboard() {
                 <label className="text-[10px] font-bold uppercase text-gray-500 ml-1">Data startu</label>
                 <input type="datetime-local" value={editingTourney.scheduledDate} onChange={e => setEditingTourney({...editingTourney, scheduledDate: e.target.value})} className="w-full p-3 rounded-xl bg-black/50 border border-gray-800 text-gray-300 outline-none text-sm" />
               </div>
-              
               <div className="flex gap-3 mt-6">
                 <button onClick={() => setEditingTourney(null)} className="flex-1 bg-gray-800 hover:bg-gray-700 text-white font-bold py-3 rounded-xl uppercase transition">Anuluj</button>
                 <button onClick={updateTournament} className="flex-1 bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-3 rounded-xl uppercase transition">Zapisz</button>
@@ -209,7 +263,6 @@ export default function PokerDashboard() {
       )}
 
       <div className="max-w-6xl mx-auto">
-        {/* TOP BAR */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-10">
           <div>
             <h1 className="text-4xl font-black text-yellow-500 tracking-tighter uppercase italic">BRTracker</h1>
@@ -227,7 +280,6 @@ export default function PokerDashboard() {
           )}
         </div>
 
-        {/* STATS GRID */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <StatBox label="Twój Zysk Netto" value={`$${stats.profit.toFixed(2)}`} sub={`${stats.count} gier`} color={stats.profit >= 0 ? "text-green-400" : "text-red-500"} />
           <StatBox label="ROI %" value={`${stats.roi.toFixed(1)}%`} sub="Z Twojego wkładu" color="text-yellow-500" />
@@ -243,7 +295,6 @@ export default function PokerDashboard() {
           </div>
         </div>
 
-        {/* CHART SECTION */}
         <div className="bg-[#0f0f0f] border border-gray-800 rounded-3xl p-6 mb-8 shadow-2xl">
           <h2 className="text-gray-400 text-xs font-bold uppercase mb-6 tracking-widest text-center">Wykres Twojego Bankrollu</h2>
           <div className="h-[300px] w-full">
@@ -265,7 +316,6 @@ export default function PokerDashboard() {
           </div>
         </div>
 
-        {/* LISTA I ADMIN */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2">
             <h3 className="text-xl font-bold mb-4 flex items-center gap-2">📋 Oferta & Historia</h3>
@@ -275,7 +325,6 @@ export default function PokerDashboard() {
                 const kept = 100 - t.max_sell_percent;
                 const myWin = t.winnings * (kept / 100);
                 const net = t.is_finished ? (myWin - myCost) : 0;
-                
                 const isIncoming = !t.is_finished && t.scheduled_date && new Date(t.scheduled_date) > new Date();
 
                 return (
@@ -331,13 +380,30 @@ export default function PokerDashboard() {
             </div>
           </div>
 
-          {/* SZYBKIE DODAWANIE */}
           <div>
             {isAdmin && (
                 <div className="bg-yellow-500 p-6 rounded-3xl text-black sticky top-8 shadow-2xl">
                     <h3 className="font-black text-xl mb-4 uppercase italic">Dodaj nową grę</h3>
                     <div className="space-y-3">
-                        <input type="text" placeholder="Nazwa turnieju" value={addForm.name} onChange={e => setAddForm({...addForm, name: e.target.value})} className="w-full p-3 rounded-xl bg-black/10 border border-black/20 placeholder:text-black/50 outline-none font-medium" />
+                        
+                        {/* WYSZUKIWARKA Z SZABLONAMI */}
+                        <div>
+                          <div className="flex justify-between items-end mb-1">
+                            <label className="text-[10px] font-bold uppercase text-black/60 ml-1">Nazwa turnieju</label>
+                            <button onClick={() => setShowTemplatesModal(true)} className="text-[10px] bg-black/10 hover:bg-black/20 text-black font-bold px-2 py-1 rounded transition">⚙️ Baza Turniejów</button>
+                          </div>
+                          <input 
+                            type="text" 
+                            list="tourney-templates"
+                            placeholder="Wybierz z listy lub wpisz..." 
+                            value={addForm.name} 
+                            onChange={handleTemplateSelect} 
+                            className="w-full p-3 rounded-xl bg-black/10 border border-black/20 placeholder:text-black/50 outline-none font-medium" 
+                          />
+                          <datalist id="tourney-templates">
+                            {templates.map(t => <option key={t.id} value={t.name} />)}
+                          </datalist>
+                        </div>
                         
                         <div className="grid grid-cols-2 gap-3">
                           <div>
