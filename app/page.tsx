@@ -112,6 +112,7 @@ export default function PokerDashboard() {
     
     setChartData([{ name: 'Start', bankroll: baseBR, isStart: true }, ...processedChart]);
 
+    // Sortowanie (Oferty > W grze > Historia)
     const listSort = [...tData].sort((a, b) => {
       const aMax = Number(a.max_sell_percent || 0);
       const aAct = Number(a.sold_percent !== null ? a.sold_percent : aMax);
@@ -202,7 +203,7 @@ export default function PokerDashboard() {
     return null;
   };
 
-  // Statystyki pod nagłówkiem listy
+  // Statystyki pod nagłówkiem listy (Kolory zaktualizowane)
   const activeOffersCount = tournaments.filter(t => {
     const max = Number(t.max_sell_percent || 0);
     const act = Number(t.sold_percent !== null ? t.sold_percent : max);
@@ -212,7 +213,7 @@ export default function PokerDashboard() {
   const soldOutCount = totalTourneys - activeOffersCount;
 
   return (
-    <main className="min-h-screen bg-[#050505] text-white p-4 md:p-8 font-sans">
+    <main className="min-h-screen bg-[#050505] text-white p-4 md:p-8 font-sans relative">
       
       {showAdjModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4">
@@ -326,8 +327,8 @@ export default function PokerDashboard() {
               <h3 className="text-xl font-bold uppercase italic mb-2">📋 Oferta & Historia</h3>
               <div className="flex gap-2 text-[10px] font-bold uppercase tracking-widest">
                 <div className="bg-[#0f0f0f] border border-gray-800 px-3 py-1.5 rounded-lg text-gray-500">Wszystkie: <span className="text-white">{totalTourneys}</span></div>
-                <div className="bg-[#0a1a0f] border border-green-800/50 px-3 py-1.5 rounded-lg text-gray-400">Dostępne: <span className="text-green-500">{activeOffersCount}</span></div>
-                <div className="bg-[#0f0f0f] border border-gray-800 px-3 py-1.5 rounded-lg text-gray-500">Sprzedane: <span className="text-white">{soldOutCount}</span></div>
+                <div className="bg-[#2a1a05] border border-amber-800/50 px-3 py-1.5 rounded-lg text-gray-400">Oferty: <span className="text-amber-400">{activeOffersCount}</span></div>
+                <div className="bg-[#0f0f0f] border border-gray-800 px-3 py-1.5 rounded-lg text-gray-500">Zamknięte: <span className="text-white">{soldOutCount}</span></div>
               </div>
             </div>
             
@@ -339,17 +340,29 @@ export default function PokerDashboard() {
                 
                 const myC = t.buy_in - (t.buy_in * (actSold / 100) * t.markup);
                 const net = t.is_finished ? ((t.winnings * (kept / 100)) - myC) : 0;
-                const isInc = !t.is_finished && t.scheduled_date && new Date(t.scheduled_date) > new Date();
                 
-                let boxStyle = "bg-[#0f0f0f] border-gray-800";
+                const schedDate = t.scheduled_date ? new Date(t.scheduled_date) : null;
+                const isInc = !t.is_finished && schedDate && schedDate > new Date();
+                const isRunning = !t.is_finished && !isInc && (actSold === maxSold || maxSold === 0);
+
+                // NOWY SYSTEM KOLORÓW KART
+                let boxStyle = "bg-[#0f0f0f] border-gray-800"; // Domyślny (Wyprzedane/Czekające)
+                
                 if (t.is_finished) {
-                  boxStyle = net > 0 ? "bg-green-900/10 border-green-500/30" : "bg-red-900/10 border-red-500/30";
+                  // Rozliczone: Wygrana (Emerald) lub Przegrana (Red)
+                  boxStyle = net > 0 
+                    ? "bg-emerald-950/40 border-emerald-500/50 shadow-[inset_0_0_10px_rgba(16,185,129,0.1)]" 
+                    : "bg-red-950/30 border-red-500/40";
                 } else if (actSold < maxSold) {
-                  boxStyle = "bg-[#0a1a0f] border-green-800/50"; // Ciemny, militarny zielony
+                  // Aktywna Oferta: Bursztynowy
+                  boxStyle = "bg-amber-950/20 border-amber-500/30";
+                } else if (isRunning) {
+                  // W grze (Live): Niebieski
+                  boxStyle = "bg-sky-950/30 border-sky-500/30";
                 }
 
                 return (
-                  <div key={t.id} className={`${boxStyle} border p-4 rounded-2xl flex justify-between items-center group transition-colors hover:brightness-125`}>
+                  <div key={t.id} className={`${boxStyle} border p-4 rounded-2xl flex justify-between items-center group transition-all hover:brightness-125`}>
                     <div className="italic">
                       <span className="text-[10px] text-yellow-500 font-bold uppercase">{t.scheduled_date ? new Date(t.scheduled_date).toLocaleString('pl-PL', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}) : 'LIVE'}</span>
                       <h4 className="font-bold text-gray-200 mt-1">{t.name}</h4>
@@ -361,7 +374,7 @@ export default function PokerDashboard() {
                         </p>
                         
                         {!t.is_finished && actSold < maxSold ? (
-                          <p className="text-[13px] font-black text-green-600 uppercase tracking-wide">
+                          <p className="text-[13px] font-black text-amber-400 uppercase tracking-wide">
                             {actSold}% OUT OF {maxSold}% SOLD
                           </p>
                         ) : (
@@ -375,9 +388,11 @@ export default function PokerDashboard() {
                     <div className="flex items-center gap-4 italic">
                       <div className="text-right">
                         {t.is_finished ? (
-                          <span className={`font-black ${net >= 0 ? 'text-green-400' : 'text-red-500'}`}>{net >= 0 ? '+' : ''}${net.toFixed(2)}</span>
+                          <span className={`font-black ${net > 0 ? 'text-green-400' : 'text-red-500'}`}>{net >= 0 ? '+' : ''}${net.toFixed(2)}</span>
+                        ) : isRunning ? (
+                          <span className="text-[10px] px-2 py-1 rounded-lg uppercase font-bold bg-sky-500/10 text-sky-400 animate-pulse">W grze</span>
                         ) : (
-                          <span className={`text-[10px] px-2 py-1 rounded-lg uppercase font-bold ${isInc ? 'bg-blue-500/10 text-blue-400' : 'bg-yellow-500/10 text-yellow-500 animate-pulse'}`}>{isInc ? 'Wkrótce' : 'W grze'}</span>
+                          <span className={`text-[10px] px-2 py-1 rounded-lg uppercase font-bold ${isInc ? 'bg-blue-500/10 text-blue-400' : 'bg-gray-700/30 text-gray-400'}`}>{isInc ? 'Wkrótce' : 'Czeka'}</span>
                         )}
                       </div>
                       {isAdmin && (
