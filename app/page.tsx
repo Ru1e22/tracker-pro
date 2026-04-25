@@ -112,7 +112,6 @@ export default function PokerDashboard() {
     
     setChartData([{ name: 'Start', bankroll: baseBR, isStart: true }, ...processedChart]);
 
-    // NOWE INTELIGENTNE SORTOWANIE (OFERTY NA GÓRĘ)
     const listSort = [...tData].sort((a, b) => {
       const aMax = Number(a.max_sell_percent || 0);
       const aAct = Number(a.sold_percent !== null ? a.sold_percent : aMax);
@@ -122,13 +121,9 @@ export default function PokerDashboard() {
       const bAct = Number(b.sold_percent !== null ? b.sold_percent : bMax);
       const bOffer = !b.is_finished && (bAct < bMax);
 
-      // 1. Priorytet: Oferty na samej górze
       if (aOffer !== bOffer) return aOffer ? -1 : 1;
-      
-      // 2. Priorytet: Nierozliczone nad rozliczonymi
       if (a.is_finished !== b.is_finished) return a.is_finished ? 1 : -1;
       
-      // 3. Priorytet: Data (Dla nierozliczonych rosnąco, dla rozliczonych malejąco)
       const dA = a.scheduled_date ? new Date(a.scheduled_date).getTime() : new Date(a.created_at).getTime();
       const dB = b.scheduled_date ? new Date(b.scheduled_date).getTime() : new Date(b.created_at).getTime();
       return !a.is_finished ? dA - dB : dB - dA;
@@ -340,10 +335,24 @@ export default function PokerDashboard() {
                   <div className="italic">
                     <span className="text-[10px] text-yellow-500 font-bold uppercase">{t.scheduled_date ? new Date(t.scheduled_date).toLocaleString('pl-PL', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}) : 'LIVE'}</span>
                     <h4 className="font-bold text-gray-200 mt-1">{t.name}</h4>
-                    <p className="text-[11px] text-gray-400 mt-1">
-                      BI: ${t.buy_in} | Sprzedano: {actSold}% / {maxSold}% (MU: {t.markup}) 
-                      {isAdmin && <span className="text-yellow-500 font-bold ml-1">| Zostawiasz: {kept}%</span>}
-                    </p>
+                    
+                    <div className="mt-1">
+                      <p className="text-[11px] text-gray-400 mb-1">
+                        BI: ${t.buy_in} | MU: {t.markup} 
+                        {isAdmin && <span className="text-yellow-500 font-bold ml-1">| Zostawiasz: {kept}%</span>}
+                      </p>
+                      
+                      {!t.is_finished && actSold < maxSold ? (
+                        <p className="text-[14px] font-black text-green-400 uppercase tracking-wide">
+                          {actSold}% OUT OF {maxSold}% SOLD
+                        </p>
+                      ) : (
+                        <p className="text-[10px] font-bold text-gray-600 uppercase tracking-widest">
+                          SOLD ({actSold}%)
+                        </p>
+                      )}
+                    </div>
+
                   </div>
                   <div className="flex items-center gap-4 italic">
                     <div className="text-right">
