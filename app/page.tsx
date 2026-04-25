@@ -17,9 +17,8 @@ export default function PokerDashboard() {
   const [stats, setStats] = useState({ profit: 0, roi: 0, itm: 0, count: 0 });
   
   const [startBankroll, setStartBankroll] = useState(337.29);
-  const [timeFilter, setTimeFilter] = useState('all'); // '7d', '30d', '1y', 'all'
+  const [timeFilter, setTimeFilter] = useState('all');
 
-  // Formularze
   const [authForm, setAuthForm] = useState({ email: '', password: '' });
   const [addForm, setAddForm] = useState({ name: '', buyIn: '', markup: '1.0', maxSold: '0', actuallySold: '0', scheduledDate: '' });
   const [editingTourney, setEditingTourney] = useState<any>(null);
@@ -28,7 +27,6 @@ export default function PokerDashboard() {
   const [showAdjModal, setShowAdjModal] = useState(false);
   const [adjForm, setAdjForm] = useState({ amount: '', reason: '' });
 
-  // Shoutbox
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [chatNick, setChatNick] = useState('');
@@ -37,7 +35,7 @@ export default function PokerDashboard() {
     checkUser();
     loadInitialData();
     fetchChat();
-    const chatInterval = setInterval(fetchChat, 10000); // Odświeża czat co 10s
+    const chatInterval = setInterval(fetchChat, 10000);
     return () => clearInterval(chatInterval);
   }, []);
 
@@ -169,23 +167,26 @@ export default function PokerDashboard() {
     fetchData(startBankroll);
   };
 
-  // ... (addTournament, updateTournament, settleTournament, saveNewTemplate, saveAdjustment - BEZ ZMIAN)
   const addTournament = async () => {
     if (!addForm.name || !addForm.buyIn) return alert("Podaj nazwę!");
     await supabase.from('tournaments').insert([{ name: addForm.name, buy_in: parseFloat(addForm.buyIn), markup: parseFloat(addForm.markup), max_sell_percent: parseFloat(addForm.maxSold), sold_percent: parseFloat(addForm.actuallySold), scheduled_date: addForm.scheduledDate ? new Date(addForm.scheduledDate).toISOString() : null, is_finished: false }]);
     setAddForm({ name: '', buyIn: '', markup: '1.0', maxSold: '0', actuallySold: '0', scheduledDate: '' }); fetchData(startBankroll);
   };
+  
   const updateTournament = async () => {
     await supabase.from('tournaments').update({ name: editingTourney.name, buy_in: parseFloat(editingTourney.buyIn), markup: parseFloat(editingTourney.markup), max_sell_percent: parseFloat(editingTourney.maxSold), sold_percent: parseFloat(editingTourney.actuallySold), scheduled_date: editingTourney.scheduledDate ? new Date(editingTourney.scheduledDate).toISOString() : null }).eq('id', editingTourney.id);
     setEditingTourney(null); fetchData(startBankroll);
   };
+  
   const settleTournament = async (id: string) => {
     const val = prompt("Ile wygrałeś ŁĄCZNIE? (Jeśli 0, wpisz 0)");
     if (val !== null) { await supabase.from('tournaments').update({ winnings: parseFloat(val), is_finished: true, live_status: 'normal' }).eq('id', id); fetchData(startBankroll); }
   };
+  
   const saveNewTemplate = async () => {
     if(newTemplate.name) { await supabase.from('tournament_templates').insert([{ name: newTemplate.name, default_buy_in: parseFloat(newTemplate.buyIn || '0') }]); setNewTemplate({ name: '', buyIn: '' }); fetchTemplates(); }
   };
+  
   const saveAdjustment = async () => {
     if(adjForm.amount && adjForm.reason) { await supabase.from('bankroll_adjustments').insert([{ amount: parseFloat(adjForm.amount), reason: adjForm.reason }]); setShowAdjModal(false); setAdjForm({ amount: '', reason: '' }); fetchData(startBankroll); }
   };
@@ -214,7 +215,6 @@ export default function PokerDashboard() {
   return (
     <main className="min-h-screen bg-[#050505] text-white p-4 md:p-8 font-sans pb-20">
       
-      {/* MODALE - (Korekta, Szablony, Edycja) - Skrócone dla czytelności */}
       {showAdjModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4">
           <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-sm"><h3 className="font-black text-xl mb-4 text-blue-400 italic">Korekta</h3>
@@ -389,7 +389,7 @@ export default function PokerDashboard() {
                 <input type="text" placeholder="Nick (opcjonalnie)" value={chatNick} onChange={e=>setChatNick(e.target.value)} className="w-full bg-[#111] border border-gray-800 p-2 rounded-lg text-xs outline-none" maxLength={15} />
                 <div className="flex gap-2">
                   <input type="text" placeholder="Napisz wiadomość..." value={chatInput} onChange={e=>setChatInput(e.target.value)} className="flex-1 bg-[#111] border border-gray-800 p-2 rounded-lg text-sm outline-none" maxLength={100} />
-                  <button type="submit" className="bg-yellow-500 text-black px-3 rounded-lg font-bold">></button>
+                  <button type="submit" className="bg-yellow-500 text-black px-3 rounded-lg font-bold">Wyślij</button>
                 </div>
               </form>
             </div>
