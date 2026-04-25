@@ -129,16 +129,6 @@ export default function PokerDashboard() {
     }
   };
 
-  const handleTemplateSelect = (e: any) => {
-    const val = e.target.value;
-    const match = templates.find(t => t.name === val);
-    if (match) {
-      setAddForm({ ...addForm, name: val, buyIn: match.default_buy_in.toString() });
-    } else {
-      setAddForm({ ...addForm, name: val });
-    }
-  };
-
   const saveNewTemplate = async () => {
     if(!newTemplate.name) return;
     await supabase.from('tournament_templates').insert([{ name: newTemplate.name, default_buy_in: parseFloat(newTemplate.buyIn || '0') }]);
@@ -222,7 +212,7 @@ export default function PokerDashboard() {
         </div>
       )}
 
-      {/* MODAL EDYCJI TURNIEJU (Aktywnego) */}
+      {/* MODAL EDYCJI TURNIEJU */}
       {editingTourney && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
           <div className="bg-[#111] border border-yellow-500/30 p-6 rounded-3xl w-full max-w-md shadow-2xl shadow-yellow-500/10">
@@ -325,6 +315,7 @@ export default function PokerDashboard() {
                 const kept = 100 - t.max_sell_percent;
                 const myWin = t.winnings * (kept / 100);
                 const net = t.is_finished ? (myWin - myCost) : 0;
+                
                 const isIncoming = !t.is_finished && t.scheduled_date && new Date(t.scheduled_date) > new Date();
 
                 return (
@@ -386,23 +377,37 @@ export default function PokerDashboard() {
                     <h3 className="font-black text-xl mb-4 uppercase italic">Dodaj nową grę</h3>
                     <div className="space-y-3">
                         
-                        {/* WYSZUKIWARKA Z SZABLONAMI */}
+                        {/* WYSZUKIWARKA Z SZABLONAMI - WYRAŹNY PRZYCISK */}
                         <div>
                           <div className="flex justify-between items-end mb-1">
                             <label className="text-[10px] font-bold uppercase text-black/60 ml-1">Nazwa turnieju</label>
-                            <button onClick={() => setShowTemplatesModal(true)} className="text-[10px] bg-black/10 hover:bg-black/20 text-black font-bold px-2 py-1 rounded transition">⚙️ Baza Turniejów</button>
+                            <button onClick={(e) => { e.preventDefault(); setShowTemplatesModal(true); }} className="text-[10px] bg-black/10 hover:bg-black/20 text-black font-bold px-2 py-1 rounded transition shadow-sm">⚙️ Baza Turniejów</button>
                           </div>
-                          <input 
-                            type="text" 
-                            list="tourney-templates"
-                            placeholder="Wybierz z listy lub wpisz..." 
-                            value={addForm.name} 
-                            onChange={handleTemplateSelect} 
-                            className="w-full p-3 rounded-xl bg-black/10 border border-black/20 placeholder:text-black/50 outline-none font-medium" 
-                          />
-                          <datalist id="tourney-templates">
-                            {templates.map(t => <option key={t.id} value={t.name} />)}
-                          </datalist>
+                          <div className="flex bg-black/5 border border-black/20 rounded-xl overflow-hidden focus-within:ring-1 ring-black/50 transition-all">
+                            <select 
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if(val) {
+                                  const match = templates.find(t => t.name === val);
+                                  setAddForm({ ...addForm, name: val, buyIn: match ? match.default_buy_in.toString() : addForm.buyIn });
+                                  e.target.value = ""; // Reset żeby można było wybrać znowu to samo
+                                }
+                              }}
+                              className="w-12 bg-black/10 text-black outline-none cursor-pointer text-center font-black hover:bg-black/20 transition-colors appearance-none flex items-center justify-center"
+                              title="Rozwiń listę turniejów"
+                              style={{ textAlignLast: 'center' }}
+                            >
+                              <option value="">▼</option>
+                              {templates.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
+                            </select>
+                            <input 
+                              type="text" 
+                              placeholder="Wybierz strzałką lub wpisz z palca..." 
+                              value={addForm.name} 
+                              onChange={e => setAddForm({...addForm, name: e.target.value})} 
+                              className="w-full p-3 bg-transparent placeholder:text-black/50 outline-none font-medium" 
+                            />
+                          </div>
                         </div>
                         
                         <div className="grid grid-cols-2 gap-3">
