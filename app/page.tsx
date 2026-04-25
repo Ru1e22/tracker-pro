@@ -4,7 +4,9 @@ import { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
-const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 export default function PokerDashboard() {
   const [isAdmin, setIsAdmin] = useState(false);
@@ -54,7 +56,6 @@ export default function PokerDashboard() {
     
     if (!tData) return;
 
-    // Łączymy turnieje i korekty na jednej osi czasu
     const timeline: any[] = [
       ...tData.map(t => ({
         type: 'tournament',
@@ -111,8 +112,23 @@ export default function PokerDashboard() {
     
     setChartData([{ name: 'Start', bankroll: baseBR, isStart: true }, ...processedChart]);
 
+    // NOWE INTELIGENTNE SORTOWANIE (OFERTY NA GÓRĘ)
     const listSort = [...tData].sort((a, b) => {
+      const aMax = Number(a.max_sell_percent || 0);
+      const aAct = Number(a.sold_percent !== null ? a.sold_percent : aMax);
+      const aOffer = !a.is_finished && (aAct < aMax);
+
+      const bMax = Number(b.max_sell_percent || 0);
+      const bAct = Number(b.sold_percent !== null ? b.sold_percent : bMax);
+      const bOffer = !b.is_finished && (bAct < bMax);
+
+      // 1. Priorytet: Oferty na samej górze
+      if (aOffer !== bOffer) return aOffer ? -1 : 1;
+      
+      // 2. Priorytet: Nierozliczone nad rozliczonymi
       if (a.is_finished !== b.is_finished) return a.is_finished ? 1 : -1;
+      
+      // 3. Priorytet: Data (Dla nierozliczonych rosnąco, dla rozliczonych malejąco)
       const dA = a.scheduled_date ? new Date(a.scheduled_date).getTime() : new Date(a.created_at).getTime();
       const dB = b.scheduled_date ? new Date(b.scheduled_date).getTime() : new Date(b.created_at).getTime();
       return !a.is_finished ? dA - dB : dB - dA;
@@ -161,7 +177,6 @@ export default function PokerDashboard() {
     fetchData(startBankroll);
   };
 
-  // Niestandardowy Tooltip dla Wykresu
   const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
       const data = payload[0].payload;
@@ -195,7 +210,6 @@ export default function PokerDashboard() {
   return (
     <main className="min-h-screen bg-[#050505] text-white p-4 md:p-8 font-sans">
       
-      {/* MODAL KOREKTY */}
       {showAdjModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4">
           <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-sm shadow-2xl">
@@ -212,7 +226,6 @@ export default function PokerDashboard() {
         </div>
       )}
 
-      {/* MODAL SZABLONÓW */}
       {showTemplatesModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4">
           <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-lg shadow-2xl">
@@ -237,7 +250,6 @@ export default function PokerDashboard() {
         </div>
       )}
 
-      {/* MODAL EDYCJI */}
       {editingTourney && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4">
           <div className="bg-[#111] border border-yellow-500/30 p-6 rounded-3xl w-full max-w-md">
@@ -316,12 +328,11 @@ export default function PokerDashboard() {
               const net = t.is_finished ? ((t.winnings * (kept / 100)) - myC) : 0;
               const isInc = !t.is_finished && t.scheduled_date && new Date(t.scheduled_date) > new Date();
               
-              // Logika kolorów
               let boxStyle = "bg-[#0f0f0f] border-gray-800";
               if (t.is_finished) {
                 boxStyle = net > 0 ? "bg-green-900/10 border-green-500/30" : "bg-red-900/10 border-red-500/30";
               } else if (actSold < maxSold) {
-                boxStyle = "bg-green-900/5 border-green-500/50"; // W Ofercie (niewyprzedane)
+                boxStyle = "bg-green-900/5 border-green-500/50";
               }
 
               return (
