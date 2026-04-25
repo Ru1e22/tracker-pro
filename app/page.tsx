@@ -202,6 +202,15 @@ export default function PokerDashboard() {
     return null;
   };
 
+  // Statystyki pod nagłówkiem listy
+  const activeOffersCount = tournaments.filter(t => {
+    const max = Number(t.max_sell_percent || 0);
+    const act = Number(t.sold_percent !== null ? t.sold_percent : max);
+    return !t.is_finished && act < max;
+  }).length;
+  const totalTourneys = tournaments.length;
+  const soldOutCount = totalTourneys - activeOffersCount;
+
   return (
     <main className="min-h-screen bg-[#050505] text-white p-4 md:p-8 font-sans">
       
@@ -312,67 +321,77 @@ export default function PokerDashboard() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-2 space-y-3">
-            <h3 className="text-xl font-bold uppercase italic mb-4">📋 Oferta & Historia</h3>
-            {tournaments.map((t) => {
-              const maxSold = Number(t.max_sell_percent || 0);
-              const actSold = Number(t.sold_percent !== null ? t.sold_percent : maxSold);
-              const kept = 100 - actSold;
-              
-              const myC = t.buy_in - (t.buy_in * (actSold / 100) * t.markup);
-              const net = t.is_finished ? ((t.winnings * (kept / 100)) - myC) : 0;
-              const isInc = !t.is_finished && t.scheduled_date && new Date(t.scheduled_date) > new Date();
-              
-              let boxStyle = "bg-[#0f0f0f] border-gray-800";
-              if (t.is_finished) {
-                boxStyle = net > 0 ? "bg-green-900/10 border-green-500/30" : "bg-red-900/10 border-red-500/30";
-              } else if (actSold < maxSold) {
-                boxStyle = "bg-green-900/5 border-green-500/50";
-              }
+          <div className="lg:col-span-2">
+            <div className="mb-4">
+              <h3 className="text-xl font-bold uppercase italic mb-2">📋 Oferta & Historia</h3>
+              <div className="flex gap-2 text-[10px] font-bold uppercase tracking-widest">
+                <div className="bg-[#0f0f0f] border border-gray-800 px-3 py-1.5 rounded-lg text-gray-500">Wszystkie: <span className="text-white">{totalTourneys}</span></div>
+                <div className="bg-[#0a1a0f] border border-green-800/50 px-3 py-1.5 rounded-lg text-gray-400">Dostępne: <span className="text-green-500">{activeOffersCount}</span></div>
+                <div className="bg-[#0f0f0f] border border-gray-800 px-3 py-1.5 rounded-lg text-gray-500">Sprzedane: <span className="text-white">{soldOutCount}</span></div>
+              </div>
+            </div>
+            
+            <div className="space-y-3">
+              {tournaments.map((t) => {
+                const maxSold = Number(t.max_sell_percent || 0);
+                const actSold = Number(t.sold_percent !== null ? t.sold_percent : maxSold);
+                const kept = 100 - actSold;
+                
+                const myC = t.buy_in - (t.buy_in * (actSold / 100) * t.markup);
+                const net = t.is_finished ? ((t.winnings * (kept / 100)) - myC) : 0;
+                const isInc = !t.is_finished && t.scheduled_date && new Date(t.scheduled_date) > new Date();
+                
+                let boxStyle = "bg-[#0f0f0f] border-gray-800";
+                if (t.is_finished) {
+                  boxStyle = net > 0 ? "bg-green-900/10 border-green-500/30" : "bg-red-900/10 border-red-500/30";
+                } else if (actSold < maxSold) {
+                  boxStyle = "bg-[#0a1a0f] border-green-800/50"; // Ciemny, militarny zielony
+                }
 
-              return (
-                <div key={t.id} className={`${boxStyle} border p-4 rounded-2xl flex justify-between items-center group transition-colors hover:brightness-125`}>
-                  <div className="italic">
-                    <span className="text-[10px] text-yellow-500 font-bold uppercase">{t.scheduled_date ? new Date(t.scheduled_date).toLocaleString('pl-PL', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}) : 'LIVE'}</span>
-                    <h4 className="font-bold text-gray-200 mt-1">{t.name}</h4>
-                    
-                    <div className="mt-1">
-                      <p className="text-[11px] text-gray-400 mb-1">
-                        BI: ${t.buy_in} | MU: {t.markup} 
-                        {isAdmin && <span className="text-yellow-500 font-bold ml-1">| Zostawiasz: {kept}%</span>}
-                      </p>
+                return (
+                  <div key={t.id} className={`${boxStyle} border p-4 rounded-2xl flex justify-between items-center group transition-colors hover:brightness-125`}>
+                    <div className="italic">
+                      <span className="text-[10px] text-yellow-500 font-bold uppercase">{t.scheduled_date ? new Date(t.scheduled_date).toLocaleString('pl-PL', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}) : 'LIVE'}</span>
+                      <h4 className="font-bold text-gray-200 mt-1">{t.name}</h4>
                       
-                      {!t.is_finished && actSold < maxSold ? (
-                        <p className="text-[14px] font-black text-green-400 uppercase tracking-wide">
-                          {actSold}% OUT OF {maxSold}% SOLD
+                      <div className="mt-1">
+                        <p className="text-[11px] text-gray-400 mb-1">
+                          BI: ${t.buy_in} | MU: {t.markup} 
+                          {isAdmin && <span className="text-yellow-500 font-bold ml-1">| Zostawiasz: {kept}%</span>}
                         </p>
-                      ) : (
-                        <p className="text-[10px] font-bold text-gray-600 uppercase tracking-widest">
-                          SOLD ({actSold}%)
-                        </p>
-                      )}
-                    </div>
-
-                  </div>
-                  <div className="flex items-center gap-4 italic">
-                    <div className="text-right">
-                      {t.is_finished ? (
-                        <span className={`font-black ${net >= 0 ? 'text-green-400' : 'text-red-500'}`}>{net >= 0 ? '+' : ''}${net.toFixed(2)}</span>
-                      ) : (
-                        <span className={`text-[10px] px-2 py-1 rounded-lg uppercase font-bold ${isInc ? 'bg-blue-500/10 text-blue-400' : 'bg-yellow-500/10 text-yellow-500 animate-pulse'}`}>{isInc ? 'Wkrótce' : 'W grze'}</span>
-                      )}
-                    </div>
-                    {isAdmin && (
-                      <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        {!t.is_finished && <button onClick={() => settleTournament(t.id)} className="bg-white text-black text-[10px] font-bold px-2 py-1 rounded uppercase">Ok</button>}
-                        <button onClick={() => { let d = t.scheduled_date ? new Date(t.scheduled_date) : new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); setEditingTourney({...t, maxSold, actuallySold: actSold, scheduledDate: d.toISOString().slice(0,16)}); }} className="bg-gray-800 text-[10px] px-2 py-1 rounded">⚙️</button>
-                        <button onClick={async () => { if(confirm("Na pewno usunąć?")) { await supabase.from('tournaments').delete().eq('id', t.id); fetchData(startBankroll); } }} className="text-red-500 font-bold px-2">X</button>
+                        
+                        {!t.is_finished && actSold < maxSold ? (
+                          <p className="text-[13px] font-black text-green-600 uppercase tracking-wide">
+                            {actSold}% OUT OF {maxSold}% SOLD
+                          </p>
+                        ) : (
+                          <p className="text-[10px] font-bold text-gray-600 uppercase tracking-widest">
+                            SOLD ({actSold}%)
+                          </p>
+                        )}
                       </div>
-                    )}
+
+                    </div>
+                    <div className="flex items-center gap-4 italic">
+                      <div className="text-right">
+                        {t.is_finished ? (
+                          <span className={`font-black ${net >= 0 ? 'text-green-400' : 'text-red-500'}`}>{net >= 0 ? '+' : ''}${net.toFixed(2)}</span>
+                        ) : (
+                          <span className={`text-[10px] px-2 py-1 rounded-lg uppercase font-bold ${isInc ? 'bg-blue-500/10 text-blue-400' : 'bg-yellow-500/10 text-yellow-500 animate-pulse'}`}>{isInc ? 'Wkrótce' : 'W grze'}</span>
+                        )}
+                      </div>
+                      {isAdmin && (
+                        <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          {!t.is_finished && <button onClick={() => settleTournament(t.id)} className="bg-white text-black text-[10px] font-bold px-2 py-1 rounded uppercase">Ok</button>}
+                          <button onClick={() => { let d = t.scheduled_date ? new Date(t.scheduled_date) : new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); setEditingTourney({...t, maxSold, actuallySold: actSold, scheduledDate: d.toISOString().slice(0,16)}); }} className="bg-gray-800 text-[10px] px-2 py-1 rounded">⚙️</button>
+                          <button onClick={async () => { if(confirm("Na pewno usunąć?")) { await supabase.from('tournaments').delete().eq('id', t.id); fetchData(startBankroll); } }} className="text-red-500 font-bold px-2">X</button>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
 
           {isAdmin && (
