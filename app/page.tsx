@@ -286,6 +286,7 @@ export default function PokerDashboard() {
                         </div>
 
                         <div>
+                          {/* TUTAJ JEST POLE DATY! */}
                           <label className="text-[10px] font-bold uppercase text-black/60 ml-1">Data i start (Opcjonalnie)</label>
                           <input type="datetime-local" value={addForm.scheduledDate} onChange={e => setAddForm({...addForm, scheduledDate: e.target.value})} className="w-full p-3 rounded-xl bg-black/10 border border-black/20 text-black outline-none font-medium text-sm" />
                         </div>
