@@ -20,8 +20,9 @@ export default function PokerDashboard() {
   const [startBankroll, setStartBankroll] = useState(338.17);
   const [timeFilter, setTimeFilter] = useState('all');
   
-  // NOWE: Zakładki na liście (Live vs Archiwum)
   const [activeTab, setActiveTab] = useState<'live' | 'history'>('live');
+  const [archiveFrom, setArchiveFrom] = useState('');
+  const [archiveTo, setArchiveTo] = useState('');
 
   const [authForm, setAuthForm] = useState({ email: '', password: '' });
   const [addForm, setAddForm] = useState({ name: '', buyIn: '', markup: '1.0', maxSold: '0', actuallySold: '0', scheduledDate: '' });
@@ -40,9 +41,11 @@ export default function PokerDashboard() {
   const [chatInput, setChatInput] = useState('');
   const [chatNick, setChatNick] = useState('');
 
-  const [abiTarget, setAbiTarget] = useState('1.00');
+  // Dwukierunkowy Kalkulator ABI
   const [abiBi, setAbiBi] = useState('');
   const [abiMu, setAbiMu] = useState('1.0');
+  const [abiTarget, setAbiTarget] = useState('1.00');
+  const [abiSold, setAbiSold] = useState('0.0');
 
   useEffect(() => {
     const initialize = async () => {
@@ -257,18 +260,35 @@ export default function PokerDashboard() {
     } else alert("Wpisz kwotę i powód!");
   };
 
-  const calculateAbiSold = () => {
-    const target = parseFloat(abiTarget) || 0;
-    const bi = parseFloat(abiBi) || 0;
-    const mu = parseFloat(abiMu) || 1;
-    if (bi <= target || bi === 0 || mu === 0) return 0;
-    let res = ((bi - target) / (bi * mu)) * 100;
-    return res > 100 ? 100 : res;
+  // Zaktualizowany Inteligentny Kalkulator ABI (Dwukierunkowy)
+  const updateAbi = (field: 'bi' | 'mu' | 'target' | 'sold', value: string) => {
+    const bi = field === 'bi' ? parseFloat(value) || 0 : parseFloat(abiBi) || 0;
+    const mu = field === 'mu' ? parseFloat(value) || 1 : parseFloat(abiMu) || 1;
+    const target = field === 'target' ? parseFloat(value) || 0 : parseFloat(abiTarget) || 0;
+    const sold = field === 'sold' ? parseFloat(value) || 0 : parseFloat(abiSold) || 0;
+
+    if (field === 'bi') setAbiBi(value);
+    if (field === 'mu') setAbiMu(value);
+    if (field === 'target') setAbiTarget(value);
+    if (field === 'sold') setAbiSold(value);
+
+    if (field === 'bi' || field === 'mu' || field === 'target') {
+      // Obliczamy % do sprzedania na podstawie Target ABI
+      if (bi > 0 && mu > 0) {
+        let s = ((bi - target) / (bi * mu)) * 100;
+        setAbiSold(Math.max(0, Math.min(100, s)).toFixed(1));
+      } else setAbiSold('0.0');
+    } else if (field === 'sold') {
+      // Obliczamy nowy Target ABI na podstawie wpisanego %
+      if (bi > 0) {
+        let t = bi - (bi * (sold / 100) * mu);
+        setAbiTarget(t.toFixed(2));
+      } else setAbiTarget('0.00');
+    }
   };
-  const abiResult = calculateAbiSold();
 
   const handleCopyAbiToForm = () => {
-    setAddForm({ ...addForm, buyIn: abiBi, markup: abiMu, maxSold: abiResult.toFixed(1), actuallySold: '0' });
+    setAddForm({ ...addForm, buyIn: abiBi, markup: abiMu, maxSold: abiSold, actuallySold: '0' });
   };
 
   const CustomTooltip = ({ active, payload }: any) => {
@@ -296,22 +316,25 @@ export default function PokerDashboard() {
 
   const activeOffersCount = tournaments.filter(t => !t.is_finished && Number(t.sold_percent !== null ? t.sold_percent : t.max_sell_percent) < Number(t.max_sell_percent || 0)).length;
 
-  // FILTROWANIE ZAKŁADEK
   const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const displayedTournaments = tournaments.filter(t => {
     if (activeTab === 'history') {
-      return t.is_finished;
+      if (!t.is_finished) return false;
+      const tDate = t.scheduled_date ? new Date(t.scheduled_date).getTime() : new Date(t.created_at).getTime();
+      
+      if (archiveFrom && tDate < new Date(archiveFrom).getTime()) return false;
+      if (archiveTo && tDate > new Date(archiveTo + 'T23:59:59').getTime()) return false;
+      return true;
     } else {
       if (!t.is_finished) return true;
       const tDate = t.scheduled_date ? new Date(t.scheduled_date) : new Date(t.created_at);
-      return tDate > yesterday; // Pokazuje rozliczone tylko do 24h wstecz w "Live"
+      return tDate > yesterday;
     }
   });
 
   return (
     <main className="min-h-screen bg-[#050505] text-white p-4 md:p-8 font-sans pb-20">
       
-      {/* MODAL KOREKTY */}
       {showAdjModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
           <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-sm"><h3 className="font-black text-xl mb-4 text-blue-400 italic">Korekta Bankrollu</h3>
@@ -322,7 +345,6 @@ export default function PokerDashboard() {
         </div>
       )}
 
-      {/* MODAL ROZLICZANIA */}
       {settleModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
           <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-sm">
@@ -346,7 +368,6 @@ export default function PokerDashboard() {
         </div>
       )}
 
-      {/* MODAL SZABLONÓW */}
       {showTemplatesModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
           <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-lg">
@@ -357,7 +378,6 @@ export default function PokerDashboard() {
         </div>
       )}
 
-      {/* MODAL EDYCJI */}
       {editingTourney && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
           <div className="bg-[#111] border border-yellow-500/30 p-6 rounded-3xl w-full max-w-md">
@@ -437,7 +457,7 @@ export default function PokerDashboard() {
           <div className="lg:col-span-2">
             
             {/* ZAKŁADKI (TABS) */}
-            <div className="flex justify-between items-center mb-6 border-b border-gray-800 pb-2">
+            <div className="flex justify-between items-end mb-6 border-b border-gray-800 pb-2">
               <div className="flex gap-6">
                 <button onClick={() => setActiveTab('live')} className={`text-lg font-black uppercase italic transition-colors ${activeTab === 'live' ? 'text-yellow-500 border-b-2 border-yellow-500 pb-2 -mb-[10px]' : 'text-gray-600 hover:text-gray-400'}`}>
                   🔴 Live & Oferty
@@ -449,10 +469,25 @@ export default function PokerDashboard() {
               {activeTab === 'live' && <span className="text-[10px] text-gray-500 uppercase font-bold tracking-widest bg-gray-900 px-2 py-1 rounded-lg">Dostępne: <span className="text-amber-400">{activeOffersCount}</span></span>}
             </div>
 
+            {/* FILTRY ARCHIWUM */}
+            {activeTab === 'history' && (
+              <div className="flex flex-wrap gap-4 items-center mb-6 bg-[#0a0a0a] p-3 rounded-xl border border-gray-800 shadow-inner">
+                <span className="text-[10px] text-gray-500 uppercase font-bold tracking-widest">Filtruj daty:</span>
+                <div className="flex gap-2 items-center">
+                  <input type="date" value={archiveFrom} onChange={e=>setArchiveFrom(e.target.value)} className="bg-black border border-gray-800 text-gray-300 text-xs p-2 rounded-lg outline-none" />
+                  <span className="text-gray-600">-</span>
+                  <input type="date" value={archiveTo} onChange={e=>setArchiveTo(e.target.value)} className="bg-black border border-gray-800 text-gray-300 text-xs p-2 rounded-lg outline-none" />
+                  {(archiveFrom || archiveTo) && (
+                    <button onClick={() => { setArchiveFrom(''); setArchiveTo(''); }} className="text-red-500 text-[10px] font-bold px-2 py-1.5 uppercase border border-red-900/30 bg-red-900/10 rounded-lg hover:bg-red-900/30 transition">Reset</button>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="space-y-3">
               {displayedTournaments.length === 0 && (
                 <div className="text-center p-10 border border-dashed border-gray-800 rounded-3xl text-gray-600 italic">
-                  Brak turniejów do wyświetlenia w tej zakładce.
+                  Brak turniejów w tym widoku.
                 </div>
               )}
 
@@ -585,27 +620,30 @@ export default function PokerDashboard() {
 
             {isAdmin && (
               <>
-                {/* KALKULATOR ABI */}
+                {/* KALKULATOR ABI DWUKIERUNKOWY */}
                 <div className="bg-[#111] border border-gray-800 p-5 rounded-3xl shadow-xl">
                   <h3 className="font-black text-sm text-yellow-500 uppercase italic mb-3">🧮 Kalkulator ABI</h3>
-                  <div className="grid grid-cols-3 gap-2 mb-3">
-                    <div>
-                      <label className="text-[9px] text-gray-500 uppercase font-bold pl-1">Target ABI $</label>
-                      <input type="number" step="0.01" value={abiTarget} onChange={e=>setAbiTarget(e.target.value)} className="w-full p-2 bg-black/50 border border-gray-800 rounded-lg text-xs outline-none text-white font-bold" />
-                    </div>
+                  
+                  <div className="grid grid-cols-2 gap-2 mb-3">
                     <div>
                       <label className="text-[9px] text-gray-500 uppercase font-bold pl-1">Buy-in $</label>
-                      <input type="number" step="0.01" placeholder="0" value={abiBi} onChange={e=>setAbiBi(e.target.value)} className="w-full p-2 bg-black/50 border border-gray-800 rounded-lg text-xs outline-none text-white font-bold" />
+                      <input type="number" step="0.01" placeholder="0" value={abiBi} onChange={e=>updateAbi('bi', e.target.value)} className="w-full p-2 bg-black/50 border border-gray-800 rounded-lg text-xs outline-none text-white font-bold" />
                     </div>
                     <div>
                       <label className="text-[9px] text-gray-500 uppercase font-bold pl-1">Markup</label>
-                      <input type="number" step="0.01" value={abiMu} onChange={e=>setAbiMu(e.target.value)} className="w-full p-2 bg-black/50 border border-gray-800 rounded-lg text-xs outline-none text-white font-bold" />
+                      <input type="number" step="0.01" value={abiMu} onChange={e=>updateAbi('mu', e.target.value)} className="w-full p-2 bg-black/50 border border-gray-800 rounded-lg text-xs outline-none text-white font-bold" />
                     </div>
                   </div>
                   
-                  <div className="bg-black/30 border border-gray-800 p-3 rounded-xl flex justify-between items-center mb-2">
-                    <span className="text-xs text-gray-400 font-bold uppercase">Musisz sprzedać:</span>
-                    <span className="text-lg font-black text-amber-400">{abiResult.toFixed(1)}%</span>
+                  <div className="grid grid-cols-2 gap-2 mb-3 items-end">
+                    <div className="bg-[#0a0a0a] border border-gray-800 p-2 rounded-xl">
+                      <label className="text-[9px] text-yellow-500 uppercase font-bold pl-1 block mb-1">Twój Koszt (ABI $)</label>
+                      <input type="number" step="0.01" value={abiTarget} onChange={e=>updateAbi('target', e.target.value)} className="w-full bg-transparent text-lg font-black outline-none text-yellow-500" />
+                    </div>
+                    <div className="bg-amber-950/20 border border-amber-900/50 p-2 rounded-xl">
+                      <label className="text-[9px] text-amber-500 uppercase font-bold pl-1 block mb-1">Sprzedajesz %</label>
+                      <input type="number" step="0.1" value={abiSold} onChange={e=>updateAbi('sold', e.target.value)} className="w-full bg-transparent text-lg font-black outline-none text-amber-400" />
+                    </div>
                   </div>
                   
                   <button onClick={handleCopyAbiToForm} className="w-full bg-gray-800 hover:bg-gray-700 text-xs py-2 rounded-lg font-bold uppercase transition text-gray-300">
