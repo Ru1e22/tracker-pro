@@ -28,18 +28,19 @@ export default function PokerDashboard() {
   const [addForm, setAddForm] = useState({ name: '', buyIn: '', markup: '1.0', maxSold: '0', actuallySold: '0', scheduledDate: '' });
   
   const [editingTourney, setEditingTourney] = useState<any>(null);
-  
-  // Zaktualizowany formularz szablonów (Harmonogram)
   const [showTemplatesModal, setShowTemplatesModal] = useState(false);
   const [newTemplate, setNewTemplate] = useState({ name: '', buyIn: '', markup: '1.0', targetAbi: '1.0', time: '' });
   
+  // NOWE STANY DLA EDYCJI SZABLONÓW
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
+  const [editTemplateForm, setEditTemplateForm] = useState({ name: '', buyIn: '', markup: '', targetAbi: '', time: '' });
+
   const [showAdjModal, setShowAdjModal] = useState(false);
   const [adjForm, setAdjForm] = useState({ amount: '', reason: '' });
 
   const [settleModal, setSettleModal] = useState<any>(null);
   const [settleForm, setSettleForm] = useState({ prize: '', bounty: '' });
 
-  // Inteligentny Kreator Sesji (Rutyna)
   const [showBatchModal, setShowBatchModal] = useState(false);
   const [batchSelection, setBatchSelection] = useState<string[]>([]);
 
@@ -100,8 +101,19 @@ export default function PokerDashboard() {
   };
 
   const fetchTemplates = async () => {
-    const { data } = await supabase.from('tournament_templates').select('*').order('default_time', { ascending: true, nullsFirst: false });
-    setTemplates(data || []);
+    const { data } = await supabase.from('tournament_templates').select('*');
+    if (data) {
+      // INTELIGENTNE SORTOWANIE (Chronologicznie, potem te bez godziny na dół alfabetycznie)
+      const sortedData = data.sort((a, b) => {
+        if (a.default_time && b.default_time) return a.default_time.localeCompare(b.default_time);
+        if (a.default_time && !b.default_time) return -1;
+        if (!a.default_time && b.default_time) return 1;
+        return a.name.localeCompare(b.name);
+      });
+      setTemplates(sortedData);
+    } else {
+      setTemplates([]);
+    }
   };
 
   const loadInitialData = async () => {
@@ -204,14 +216,11 @@ export default function PokerDashboard() {
     setAddForm({ name: '', buyIn: '', markup: '1.0', maxSold: '0', actuallySold: '0', scheduledDate: '' });
   };
 
-  // 🔥 INTELIGENTNA RUTYNA (Generowanie Sesji) 🔥
   const handleBatchInsert = async () => {
     if (batchSelection.length === 0) return alert("Wybierz turnieje z rutyny!");
     
     const insertData = batchSelection.map(tempId => {
       const tmpl = templates.find(t => t.id === tempId);
-      
-      // Wyliczanie daty startu na podstawie godziny z szablonu
       let scheduledISO = null;
       if (tmpl.default_time) {
         const [hours, minutes] = tmpl.default_time.split(':');
@@ -220,7 +229,6 @@ export default function PokerDashboard() {
         scheduledISO = d.toISOString();
       }
 
-      // Automatyczne wyliczanie % sprzedaży pod Target ABI
       const bi = parseFloat(tmpl.default_buy_in || '0');
       const mu = parseFloat(tmpl.default_markup || '1.0');
       const target = parseFloat(tmpl.target_abi || '1.0');
@@ -274,7 +282,6 @@ export default function PokerDashboard() {
 
   const deleteTournament = async (id: string) => { if (confirm("Na pewno usunąć?")) { await supabase.from('tournaments').delete().eq('id', id); } };
   
-  // Zapisywanie nowego inteligentnego szablonu
   const saveNewTemplate = async () => {
     if(newTemplate.name) { 
       await supabase.from('tournament_templates').insert([{ 
@@ -287,6 +294,19 @@ export default function PokerDashboard() {
       setNewTemplate({ name: '', buyIn: '', markup: '1.0', targetAbi: '1.0', time: '' }); 
       fetchTemplates(); 
     }
+  };
+
+  // Zapisywanie edycji istniejącego szablonu
+  const saveEditedTemplate = async (id: string) => {
+    await supabase.from('tournament_templates').update({
+      name: editTemplateForm.name,
+      default_buy_in: parseFloat(editTemplateForm.buyIn || '0'),
+      default_markup: parseFloat(editTemplateForm.markup || '1.0'),
+      target_abi: parseFloat(editTemplateForm.targetAbi || '1.0'),
+      default_time: editTemplateForm.time || null
+    }).eq('id', id);
+    setEditingTemplateId(null);
+    fetchTemplates();
   };
 
   const saveAdjustment = async () => { if(adjForm.amount && adjForm.reason) { const { error } = await supabase.from('bankroll_adjustments').insert([{ amount: parseFloat(adjForm.amount), reason: adjForm.reason }]); if (error) alert("Błąd: " + error.message); else { setShowAdjModal(false); setAdjForm({ amount: '', reason: '' }); } } else alert("Wpisz kwotę i powód!"); };
@@ -400,7 +420,7 @@ export default function PokerDashboard() {
         </div>
       )}
 
-      {/* MODAL SZABLONÓW / RUTYNY */}
+      {/* MODAL SZABLONÓW / RUTYNY Z EDYCJĄ */}
       {showTemplatesModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
           <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-2xl max-h-[90vh] flex flex-col">
@@ -422,12 +442,39 @@ export default function PokerDashboard() {
 
             <div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
               {templates.map(t => (
-                <div key={t.id} className="flex justify-between items-center bg-black/30 p-3 rounded-lg border border-gray-800/50 hover:border-gray-700">
-                  <div>
-                    <span className="font-bold text-sm block mb-1">{t.name} <span className="text-gray-500 font-normal">(${t.default_buy_in})</span></span>
-                    <span className="text-[10px] text-gray-500 uppercase font-bold tracking-widest bg-black px-2 py-1 rounded">Godz: {t.default_time ? t.default_time.slice(0,5) : 'Brak'} | MU: {t.default_markup} | ABI: <span className="text-yellow-500">${t.target_abi}</span></span>
-                  </div>
-                  <button onClick={async()=>{await supabase.from('tournament_templates').delete().eq('id', t.id);fetchTemplates()}} className="text-red-500 text-xs font-bold px-3 border border-red-500/20 py-2 rounded-lg hover:bg-red-500/10">Usuń</button>
+                <div key={t.id} className="flex flex-col bg-black/30 p-3 rounded-lg border border-gray-800/50 hover:border-gray-700 transition">
+                  {editingTemplateId === t.id ? (
+                    <div className="space-y-2 w-full">
+                      <input value={editTemplateForm.name} onChange={e=>setEditTemplateForm({...editTemplateForm, name:e.target.value})} className="w-full p-2 bg-black border border-yellow-500/50 rounded outline-none text-xs" />
+                      <div className="grid grid-cols-4 gap-2">
+                        <div><label className="text-[9px] text-gray-500 block mb-1">BI $</label><input type="number" value={editTemplateForm.buyIn} onChange={e=>setEditTemplateForm({...editTemplateForm, buyIn:e.target.value})} className="w-full p-2 bg-black border border-gray-800 rounded outline-none text-xs" /></div>
+                        <div><label className="text-[9px] text-gray-500 block mb-1">Markup</label><input type="number" step="0.01" value={editTemplateForm.markup} onChange={e=>setEditTemplateForm({...editTemplateForm, markup:e.target.value})} className="w-full p-2 bg-black border border-gray-800 rounded outline-none text-xs" /></div>
+                        <div><label className="text-[9px] text-gray-500 block mb-1">Target ABI</label><input type="number" step="0.01" value={editTemplateForm.targetAbi} onChange={e=>setEditTemplateForm({...editTemplateForm, targetAbi:e.target.value})} className="w-full p-2 bg-black border border-gray-800 rounded outline-none text-xs text-yellow-500 font-bold" /></div>
+                        <div><label className="text-[9px] text-gray-500 block mb-1">Godzina</label><input type="time" value={editTemplateForm.time} onChange={e=>setEditTemplateForm({...editTemplateForm, time:e.target.value})} className="w-full p-2 bg-black border border-gray-800 rounded outline-none text-xs text-gray-300" /></div>
+                      </div>
+                      <div className="flex justify-end gap-2 mt-2">
+                        <button onClick={() => setEditingTemplateId(null)} className="text-gray-400 hover:text-white text-[10px] font-bold px-3 py-2 bg-gray-800 rounded-lg">Anuluj</button>
+                        <button onClick={() => saveEditedTemplate(t.id)} className="text-black text-[10px] font-bold px-4 py-2 bg-yellow-500 hover:bg-yellow-400 rounded-lg uppercase tracking-widest">Zapisz</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex justify-between items-center w-full">
+                      <div>
+                        <span className="font-bold text-sm block mb-1">{t.name} <span className="text-gray-500 font-normal">(${t.default_buy_in})</span></span>
+                        <span className="text-[10px] text-gray-500 uppercase font-bold tracking-widest bg-black px-2 py-1 rounded">Godz: {t.default_time ? t.default_time.slice(0,5) : 'Brak'} | MU: {t.default_markup} | ABI: <span className="text-yellow-500">${t.target_abi}</span></span>
+                      </div>
+                      <div className="flex gap-2">
+                        <button onClick={() => {
+                          setEditingTemplateId(t.id);
+                          setEditTemplateForm({
+                            name: t.name, buyIn: t.default_buy_in?.toString() || '0', markup: t.default_markup?.toString() || '1.0',
+                            targetAbi: t.target_abi?.toString() || '1.0', time: t.default_time ? t.default_time.slice(0,5) : ''
+                          });
+                        }} className="text-yellow-500 text-[10px] font-bold px-3 border border-yellow-500/20 py-2 rounded-lg hover:bg-yellow-500/10 transition">Edytuj</button>
+                        <button onClick={async()=>{await supabase.from('tournament_templates').delete().eq('id', t.id);fetchTemplates()}} className="text-red-500 text-[10px] font-bold px-3 border border-red-500/20 py-2 rounded-lg hover:bg-red-500/10 transition">Usuń</button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -748,7 +795,6 @@ export default function PokerDashboard() {
 
                 <div className="bg-yellow-500 p-6 rounded-3xl text-black italic font-bold uppercase shadow-2xl relative">
                   
-                  {/* PRZYCISK MASOWEGO DODAWANIA */}
                   <div className="absolute -top-3 -right-3">
                     <button onClick={() => setShowBatchModal(true)} className="bg-white text-black px-4 py-2 rounded-xl font-black text-xs border-[3px] border-[#050505] shadow-lg hover:scale-105 transition-transform uppercase tracking-widest">
                       🚀 Generuj Sesję
