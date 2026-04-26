@@ -232,8 +232,11 @@ export default function PokerDashboard() {
       const target = parseFloat(tmpl.target_abi || '1.0');
       let calcSold = 0;
       if (bi > 0 && mu > 0) {
-        const s = ((bi - target) / (bi * mu)) * 100;
-        calcSold = Math.max(0, Math.min(100, s));
+        let s = ((bi - target) / (bi * mu)) * 100;
+        s = Math.max(0, Math.min(100, s));
+        // 🔥 LOGIKA ZAOKRĄGLANIA: Jeśli BI < 30$, zaokrąglaj do dziesiątek
+        if (bi < 30) s = Math.round(s / 10) * 10;
+        calcSold = s;
       }
 
       return {
@@ -294,7 +297,6 @@ export default function PokerDashboard() {
     }
   };
 
-  // NAPRAWIONE ZAPISYWANIE EDYCJI SZABLONU
   const saveEditedTemplate = async (id: string) => {
     const { error } = await supabase.from('tournament_templates').update({
       name: editTemplateForm.name,
@@ -323,7 +325,13 @@ export default function PokerDashboard() {
     if (field === 'bi') setAbiBi(value); if (field === 'mu') setAbiMu(value); if (field === 'target') setAbiTarget(value); if (field === 'sold') setAbiSold(value);
 
     if (field === 'bi' || field === 'mu' || field === 'target') {
-      if (bi > 0 && mu > 0) { let s = ((bi - target) / (bi * mu)) * 100; setAbiSold(Math.max(0, Math.min(100, s)).toFixed(1)); } else setAbiSold('0.0');
+      if (bi > 0 && mu > 0) { 
+        let s = ((bi - target) / (bi * mu)) * 100; 
+        s = Math.max(0, Math.min(100, s));
+        // 🔥 LOGIKA ZAOKRĄGLANIA W KALKULATORZE
+        if (bi < 30) s = Math.round(s / 10) * 10;
+        setAbiSold(bi < 30 ? s.toString() : s.toFixed(1)); 
+      } else setAbiSold('0');
     } else if (field === 'sold') {
       if (bi > 0) { let t = bi - (bi * (sold / 100) * mu); setAbiTarget(t.toFixed(2)); } else setAbiTarget('0.00');
     }
@@ -370,65 +378,65 @@ export default function PokerDashboard() {
   return (
     <main className="min-h-screen bg-[#050505] text-white p-4 md:p-8 font-sans pb-20">
       
-      {showAdjModal && (
+      {/* 🚀 KREATOR SESJI / RUTYNA */}
+      {showBatchModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
-          <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-md">
-            <div className="flex justify-between mb-4">
-              <h3 className="font-black text-xl text-blue-400 italic">Korekta (+/-)</h3>
-              <button onClick={() => setShowAdjModal(false)} className="text-gray-500 hover:text-white">X</button>
+          <div className="bg-[#111] border border-yellow-500/30 p-6 rounded-3xl w-full max-w-2xl flex flex-col max-h-[90vh]">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-black text-2xl text-yellow-500 italic uppercase">🚀 Generuj Sesję</h3>
+              <button onClick={()=>setShowBatchModal(false)} className="text-gray-500 hover:text-white text-xl font-bold">X</button>
             </div>
             
-            <div className="space-y-3 mb-6">
-              <input type="number" step="0.01" placeholder="Kwota (np. -50 lub 100)" value={adjForm.amount} onChange={e=>setAdjForm({...adjForm, amount:e.target.value})} className="w-full p-3 bg-black/50 border border-gray-800 rounded-xl outline-none" />
-              <input type="text" placeholder="Powód (np. Wypłata, Bonus)" value={adjForm.reason} onChange={e=>setAdjForm({...adjForm, reason:e.target.value})} className="w-full p-3 bg-black/50 border border-gray-800 rounded-xl outline-none" />
-              <button onClick={saveAdjustment} className="w-full bg-blue-500 text-black p-3 rounded-xl font-bold uppercase tracking-widest hover:bg-blue-400">Dodaj Korektę</button>
+            <p className="text-sm text-gray-400 mb-4">Wybierz gry na dzisiaj. Aplikacja sama wyliczy procenty sprzedaży na podstawie Twoich ustawień (Target ABI i Markup). Turnieje do $30 są zaokrąglane do równych 10%.</p>
+            
+            <div className="flex justify-between items-center mb-2 px-2">
+              <h4 className="font-bold text-xs uppercase tracking-widest text-gray-500">Twój Harmonogram</h4>
+              <div className="flex gap-2">
+                <button onClick={() => setBatchSelection(templates.map(t => t.id))} className="text-[10px] text-yellow-500 underline uppercase font-bold">Zaznacz All</button>
+                <button onClick={() => setBatchSelection([])} className="text-[10px] text-gray-500 underline uppercase font-bold">Odznacz All</button>
+              </div>
             </div>
 
-            {adjustments.length > 0 && (
-              <div className="border-t border-gray-800 pt-4">
-                <h4 className="font-bold text-xs text-gray-500 uppercase tracking-widest mb-3">Historia Korekt</h4>
-                <div className="max-h-48 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
-                  {adjustments.sort((a,b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map(a => (
-                    <div key={a.id} className="flex justify-between items-center bg-black/30 p-3 rounded-xl border border-gray-800/50">
-                      <div>
-                        <p className={`font-black text-sm ${a.amount >= 0 ? 'text-green-400' : 'text-red-500'}`}>
-                          {a.amount >= 0 ? '+' : ''}{a.amount}
-                        </p>
-                        <p className="text-[10px] text-gray-400">{a.reason}</p>
+            <div className="flex-1 overflow-y-auto bg-black/30 border border-gray-800 rounded-xl p-2 space-y-1 mb-4 custom-scrollbar">
+              {templates.length === 0 && <p className="text-gray-600 text-xs p-4 text-center">Baza jest pusta. Ustaw najpierw Szablony Rutyny!</p>}
+              {templates.map(t => {
+                const target = parseFloat(t.target_abi || '1');
+                const mu = parseFloat(t.default_markup || '1');
+                const bi = parseFloat(t.default_buy_in || '0');
+                let estSold = 0;
+                if (bi > 0 && mu > 0) {
+                  let s = ((bi - target) / (bi * mu)) * 100;
+                  s = Math.max(0, Math.min(100, s));
+                  if (bi < 30) s = Math.round(s / 10) * 10;
+                  estSold = s;
+                }
+
+                return (
+                  <label key={t.id} className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition ${batchSelection.includes(t.id) ? 'bg-yellow-500/10 border border-yellow-500/30' : 'hover:bg-gray-900/50 border border-transparent'}`}>
+                    <input type="checkbox" checked={batchSelection.includes(t.id)} onChange={() => toggleBatchSelection(t.id)} className="w-5 h-5 accent-yellow-500 rounded bg-black border-gray-700" />
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-gray-500 font-bold">{t.default_time ? t.default_time.slice(0,5) : 'LIVE'}</span>
+                        <span className="font-bold text-sm text-white">{t.name}</span>
                       </div>
-                      <button onClick={() => deleteAdjustment(a.id)} className="text-red-500 text-[10px] font-bold px-2 py-1 uppercase border border-red-500/20 rounded hover:bg-red-500/10 transition">Usuń</button>
+                      <div className="text-[10px] text-gray-400 mt-1">
+                        BI: <span className="text-white">${t.default_buy_in}</span> | 
+                        MU: <span className="text-white">{t.default_markup}</span> | 
+                        Cel ABI: <span className="text-yellow-500 font-bold">${t.target_abi}</span>
+                        <span className="ml-2 text-amber-500 font-bold">→ Wystawi: {bi < 30 ? estSold : estSold.toFixed(1)}%</span>
+                      </div>
                     </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {settleModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
-          <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-sm">
-            <h3 className="font-black text-xl mb-1 text-emerald-400 italic">Rozlicz Grę</h3>
-            <p className="text-gray-400 text-xs mb-4 font-bold">{settleModal.name}</p>
-            <div className="space-y-3">
-              <div>
-                <label className="text-[10px] text-gray-500 uppercase font-bold ml-1">Kasa z miejsc (Prize $)</label>
-                <input type="number" step="0.01" placeholder="0.00" value={settleForm.prize} onChange={e=>setSettleForm({...settleForm, prize:e.target.value})} className="w-full p-3 bg-black/50 border border-emerald-900/50 rounded-xl outline-none text-emerald-400 font-bold" />
-              </div>
-              <div>
-                <label className="text-[10px] text-gray-500 uppercase font-bold ml-1">Złapane Bounty ($)</label>
-                <input type="number" step="0.01" placeholder="0.00" value={settleForm.bounty} onChange={e=>setSettleForm({...settleForm, bounty:e.target.value})} className="w-full p-3 bg-black/50 border border-blue-900/50 rounded-xl outline-none text-blue-400 font-bold" />
-              </div>
-              <div className="flex gap-2 pt-2">
-                <button onClick={() => setSettleModal(null)} className="flex-1 bg-gray-800 p-3 rounded-xl font-bold uppercase">Anuluj</button>
-                <button onClick={handleSettleTournament} className="flex-1 bg-emerald-500 text-black p-3 rounded-xl font-bold uppercase">Rozlicz</button>
-              </div>
+                  </label>
+                )
+              })}
             </div>
+
+            <button onClick={handleBatchInsert} className="w-full bg-yellow-500 text-black p-4 rounded-xl font-black uppercase tracking-widest hover:scale-[1.02] transition">Stwórz {batchSelection.length} Gier</button>
           </div>
         </div>
       )}
 
+      {/* MODAL SZABLONÓW / RUTYNY Z EDYCJĄ */}
       {showTemplatesModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
           <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-2xl max-h-[90vh] flex flex-col">
@@ -485,6 +493,40 @@ export default function PokerDashboard() {
                   )}
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* POZOSTAŁE MODALE BEZ ZMIAN */}
+      {showAdjModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
+          <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-sm"><h3 className="font-black text-xl mb-4 text-blue-400 italic">Korekta Bankrollu</h3>
+            <input type="number" step="0.01" placeholder="Kwota (np. -50 lub 100)" value={adjForm.amount} onChange={e=>setAdjForm({...adjForm, amount:e.target.value})} className="w-full p-3 bg-black/50 border border-gray-800 rounded-xl mb-2 outline-none" />
+            <input type="text" placeholder="Powód (np. Wypłata, Bonus)" value={adjForm.reason} onChange={e=>setAdjForm({...adjForm, reason:e.target.value})} className="w-full p-3 bg-black/50 border border-gray-800 rounded-xl mb-4 outline-none" />
+            <div className="flex gap-2"><button onClick={()=>setShowAdjModal(false)} className="flex-1 bg-gray-800 p-3 rounded-xl font-bold">Anuluj</button><button onClick={saveAdjustment} className="flex-1 bg-blue-500 text-black p-3 rounded-xl font-bold">Zapisz</button></div>
+          </div>
+        </div>
+      )}
+
+      {settleModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
+          <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-sm">
+            <h3 className="font-black text-xl mb-1 text-emerald-400 italic">Rozlicz Grę</h3>
+            <p className="text-gray-400 text-xs mb-4 font-bold">{settleModal.name}</p>
+            <div className="space-y-3">
+              <div>
+                <label className="text-[10px] text-gray-500 uppercase font-bold ml-1">Kasa z miejsc (Prize $)</label>
+                <input type="number" step="0.01" placeholder="0.00" value={settleForm.prize} onChange={e=>setSettleForm({...settleForm, prize:e.target.value})} className="w-full p-3 bg-black/50 border border-emerald-900/50 rounded-xl outline-none text-emerald-400 font-bold" />
+              </div>
+              <div>
+                <label className="text-[10px] text-gray-500 uppercase font-bold ml-1">Złapane Bounty ($)</label>
+                <input type="number" step="0.01" placeholder="0.00" value={settleForm.bounty} onChange={e=>setSettleForm({...settleForm, bounty:e.target.value})} className="w-full p-3 bg-black/50 border border-blue-900/50 rounded-xl outline-none text-blue-400 font-bold" />
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button onClick={() => setSettleModal(null)} className="flex-1 bg-gray-800 p-3 rounded-xl font-bold uppercase">Anuluj</button>
+                <button onClick={handleSettleTournament} className="flex-1 bg-emerald-500 text-black p-3 rounded-xl font-bold uppercase">Rozlicz</button>
+              </div>
             </div>
           </div>
         </div>
@@ -734,6 +776,7 @@ export default function PokerDashboard() {
 
             {isAdmin && (
               <>
+                {/* KALKULATOR ABI DWUKIERUNKOWY */}
                 <div className="bg-[#111] border border-gray-800 p-5 rounded-3xl shadow-xl">
                   <h3 className="font-black text-sm text-yellow-500 uppercase italic mb-3">🧮 Kalkulator ABI</h3>
                   
