@@ -37,6 +37,11 @@ export default function PokerDashboard() {
   const [settleModal, setSettleModal] = useState<any>(null);
   const [settleForm, setSettleForm] = useState({ prize: '', bounty: '' });
 
+  // NOWE: Stany do Masowego Dodawania (Batch Insert)
+  const [showBatchModal, setShowBatchModal] = useState(false);
+  const [batchSelection, setBatchSelection] = useState<string[]>([]);
+  const [batchForm, setBatchForm] = useState({ markup: '1.0', maxSold: '0', scheduledDate: '' });
+
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [chatNick, setChatNick] = useState('');
@@ -76,15 +81,8 @@ export default function PokerDashboard() {
   };
 
   const handleLogin = async () => {
-    const { error } = await supabase.auth.signInWithPassword({
-      email: authForm.email,
-      password: authForm.password
-    });
-    if (!error) {
-      setIsAdmin(true);
-    } else {
-      alert("Błąd logowania: Sprawdź email i hasło!");
-    }
+    const { error } = await supabase.auth.signInWithPassword({ email: authForm.email, password: authForm.password });
+    if (!error) setIsAdmin(true); else alert("Błąd logowania!");
   };
 
   const fetchChat = async () => {
@@ -114,7 +112,7 @@ export default function PokerDashboard() {
   };
 
   const handleEditStartBankroll = async () => {
-    const val = prompt("Podaj nowy BAZOWY bankroll startowy (od niego będzie liczyć wykres):", startBankroll.toString());
+    const val = prompt("Podaj nowy BAZOWY bankroll startowy:", startBankroll.toString());
     if (val !== null && !isNaN(Number(val))) {
       const num = parseFloat(Number(val).toFixed(2));
       const { error } = await supabase.from('settings').upsert({ id: 'start_bankroll', value: num });
@@ -158,9 +156,7 @@ export default function PokerDashboard() {
     const filteredEvents: any[] = [];
 
     timeline.forEach((item) => {
-      let net = 0;
-      let myCost = 0;
-      let isITM = false;
+      let net = 0; let myCost = 0; let isITM = false;
 
       if (item.type === 'adjustment') {
         net = Number(item.data.amount);
@@ -169,12 +165,8 @@ export default function PokerDashboard() {
         const actSold = Number(t.sold_percent !== null ? t.sold_percent : Number(t.max_sell_percent || 0));
         const kept = 100 - actSold;
         myCost = t.buy_in - (t.buy_in * (actSold / 100) * t.markup);
-        
-        const p = Number(t.prize || 0);
-        const b = Number(t.bounty || 0);
-        const total = p + b;
-
-        net = t.is_finished ? ((total * (kept / 100)) - myCost) : 0;
+        const p = Number(t.prize || 0); const b = Number(t.bounty || 0);
+        net = t.is_finished ? (((p + b) * (kept / 100)) - myCost) : 0;
         isITM = p > 0;
       }
 
@@ -183,10 +175,7 @@ export default function PokerDashboard() {
       } else {
         filteredEvents.push({ ...item, preCalcNet: net, myCost, isITM });
         if(item.type === 'tournament' && item.data.is_finished) {
-          justProfit += net;
-          finishedCount++;
-          totalMyCost += Math.max(0, myCost);
-          if(isITM) cashed++;
+          justProfit += net; finishedCount++; totalMyCost += Math.max(0, myCost); if(isITM) cashed++;
         }
       }
     });
@@ -195,19 +184,11 @@ export default function PokerDashboard() {
     const processedChart = filteredEvents.map((item, index) => {
       currentBR += item.preCalcNet;
       const dStr = item.dateObj.toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-      if (item.type === 'adjustment') {
-        return { index: index + 1, dateStr: dStr, net: item.preCalcNet, bankroll: currentBR, isAdj: true, reason: item.data.reason };
-      } else {
-        return { index: index + 1, dateStr: dStr, net: item.preCalcNet, bankroll: currentBR, isAdj: false, tourneyName: item.data.name };
-      }
+      if (item.type === 'adjustment') return { index: index + 1, dateStr: dStr, net: item.preCalcNet, bankroll: currentBR, isAdj: true, reason: item.data.reason };
+      else return { index: index + 1, dateStr: dStr, net: item.preCalcNet, bankroll: currentBR, isAdj: false, tourneyName: item.data.name };
     });
 
-    setStats({
-      profit: justProfit,
-      roi: totalMyCost > 0 ? (justProfit / totalMyCost) * 100 : 0,
-      itm: finishedCount > 0 ? (cashed / finishedCount) * 100 : 0,
-      count: finishedCount
-    });
+    setStats({ profit: justProfit, roi: totalMyCost > 0 ? (justProfit / totalMyCost) * 100 : 0, itm: finishedCount > 0 ? (cashed / finishedCount) * 100 : 0, count: finishedCount });
     setChartData([{ index: 0, dateStr: 'Start Okresu', bankroll: baselineBR, isStart: true }, ...processedChart]);
   };
 
@@ -221,10 +202,42 @@ export default function PokerDashboard() {
     await supabase.from('tournaments').insert([{ name: addForm.name, buy_in: parseFloat(addForm.buyIn), markup: parseFloat(addForm.markup), max_sell_percent: parseFloat(addForm.maxSold), sold_percent: parseFloat(addForm.actuallySold), scheduled_date: addForm.scheduledDate ? new Date(addForm.scheduledDate).toISOString() : null, is_finished: false }]);
     setAddForm({ name: '', buyIn: '', markup: '1.0', maxSold: '0', actuallySold: '0', scheduledDate: '' });
   };
+
+  // NOWE: Funkcja Masowego Wrzucania
+  const handleBatchInsert = async () => {
+    if (batchSelection.length === 0) return alert("Nie wybrałeś żadnego turnieju z bazy!");
+    
+    const insertData = batchSelection.map(tempId => {
+      const tmpl = templates.find(t => t.id === tempId);
+      return {
+        name: tmpl.name,
+        buy_in: tmpl.default_buy_in,
+        markup: parseFloat(batchForm.markup),
+        max_sell_percent: parseFloat(batchForm.maxSold),
+        sold_percent: 0, // Domyślnie startujemy od 0% sprzedanych
+        scheduled_date: batchForm.scheduledDate ? new Date(batchForm.scheduledDate).toISOString() : null,
+        is_finished: false,
+        live_status: 'normal'
+      };
+    });
+
+    const { error } = await supabase.from('tournaments').insert(insertData);
+    if (!error) {
+      setShowBatchModal(false);
+      setBatchSelection([]);
+      alert(`Pomyślnie wystawiono pakiet ${insertData.length} turniejów!`);
+    } else {
+      alert("Błąd masowego dodawania: " + error.message);
+    }
+  };
+
+  const toggleBatchSelection = (id: string) => {
+    if (batchSelection.includes(id)) setBatchSelection(batchSelection.filter(item => item !== id));
+    else setBatchSelection([...batchSelection, id]);
+  };
   
   const updateTournament = async () => {
-    const p = parseFloat(editingTourney.prize || '0');
-    const b = parseFloat(editingTourney.bounty || '0');
+    const p = parseFloat(editingTourney.prize || '0'); const b = parseFloat(editingTourney.bounty || '0');
     await supabase.from('tournaments').update({ 
       name: editingTourney.name, buy_in: parseFloat(editingTourney.buyIn), markup: parseFloat(editingTourney.markup), max_sell_percent: parseFloat(editingTourney.maxSold), sold_percent: parseFloat(editingTourney.actuallySold), 
       scheduled_date: editingTourney.scheduledDate ? new Date(editingTourney.scheduledDate).toISOString() : null,
@@ -234,70 +247,30 @@ export default function PokerDashboard() {
   };
   
   const handleSettleTournament = async () => {
-    const p = parseFloat(settleForm.prize || '0');
-    const b = parseFloat(settleForm.bounty || '0');
-    const total = p + b;
-    const { error } = await supabase.from('tournaments').update({ 
-      winnings: total, prize: p, bounty: b, is_finished: true, live_status: 'normal' 
-    }).eq('id', settleModal.id);
-    
-    if (!error) {
-      setSettleModal(null);
-      setSettleForm({ prize: '', bounty: '' });
-    } else {
-      alert("Błąd bazy: " + error.message);
-    }
+    const p = parseFloat(settleForm.prize || '0'); const b = parseFloat(settleForm.bounty || '0'); const total = p + b;
+    const { error } = await supabase.from('tournaments').update({ winnings: total, prize: p, bounty: b, is_finished: true, live_status: 'normal' }).eq('id', settleModal.id);
+    if (!error) { setSettleModal(null); setSettleForm({ prize: '', bounty: '' }); } else alert("Błąd bazy: " + error.message);
   };
 
-  const deleteTournament = async (id: string) => {
-    if (confirm("Na pewno usunąć?")) { 
-      await supabase.from('tournaments').delete().eq('id', id); 
-    }
-  };
-  
-  const saveNewTemplate = async () => {
-    if(newTemplate.name) { 
-      await supabase.from('tournament_templates').insert([{ name: newTemplate.name, default_buy_in: parseFloat(newTemplate.buyIn || '0') }]); 
-      setNewTemplate({ name: '', buyIn: '' }); 
-      fetchTemplates(); 
-    }
-  };
-  
-  const saveAdjustment = async () => {
-    if(adjForm.amount && adjForm.reason) { 
-      const { error } = await supabase.from('bankroll_adjustments').insert([{ amount: parseFloat(adjForm.amount), reason: adjForm.reason }]); 
-      if (error) alert("Błąd: " + error.message);
-      else { setShowAdjModal(false); setAdjForm({ amount: '', reason: '' }); }
-    } else alert("Wpisz kwotę i powód!");
-  };
+  const deleteTournament = async (id: string) => { if (confirm("Na pewno usunąć?")) { await supabase.from('tournaments').delete().eq('id', id); } };
+  const saveNewTemplate = async () => { if(newTemplate.name) { await supabase.from('tournament_templates').insert([{ name: newTemplate.name, default_buy_in: parseFloat(newTemplate.buyIn || '0') }]); setNewTemplate({ name: '', buyIn: '' }); fetchTemplates(); } };
+  const saveAdjustment = async () => { if(adjForm.amount && adjForm.reason) { const { error } = await supabase.from('bankroll_adjustments').insert([{ amount: parseFloat(adjForm.amount), reason: adjForm.reason }]); if (error) alert("Błąd: " + error.message); else { setShowAdjModal(false); setAdjForm({ amount: '', reason: '' }); } } else alert("Wpisz kwotę i powód!"); };
 
   const updateAbi = (field: 'bi' | 'mu' | 'target' | 'sold', value: string) => {
     const bi = field === 'bi' ? parseFloat(value) || 0 : parseFloat(abiBi) || 0;
     const mu = field === 'mu' ? parseFloat(value) || 1 : parseFloat(abiMu) || 1;
     const target = field === 'target' ? parseFloat(value) || 0 : parseFloat(abiTarget) || 0;
     const sold = field === 'sold' ? parseFloat(value) || 0 : parseFloat(abiSold) || 0;
-
-    if (field === 'bi') setAbiBi(value);
-    if (field === 'mu') setAbiMu(value);
-    if (field === 'target') setAbiTarget(value);
-    if (field === 'sold') setAbiSold(value);
+    if (field === 'bi') setAbiBi(value); if (field === 'mu') setAbiMu(value); if (field === 'target') setAbiTarget(value); if (field === 'sold') setAbiSold(value);
 
     if (field === 'bi' || field === 'mu' || field === 'target') {
-      if (bi > 0 && mu > 0) {
-        let s = ((bi - target) / (bi * mu)) * 100;
-        setAbiSold(Math.max(0, Math.min(100, s)).toFixed(1));
-      } else setAbiSold('0.0');
+      if (bi > 0 && mu > 0) { let s = ((bi - target) / (bi * mu)) * 100; setAbiSold(Math.max(0, Math.min(100, s)).toFixed(1)); } else setAbiSold('0.0');
     } else if (field === 'sold') {
-      if (bi > 0) {
-        let t = bi - (bi * (sold / 100) * mu);
-        setAbiTarget(t.toFixed(2));
-      } else setAbiTarget('0.00');
+      if (bi > 0) { let t = bi - (bi * (sold / 100) * mu); setAbiTarget(t.toFixed(2)); } else setAbiTarget('0.00');
     }
   };
 
-  const handleCopyAbiToForm = () => {
-    setAddForm({ ...addForm, buyIn: abiBi, markup: abiMu, maxSold: abiSold, actuallySold: '0' });
-  };
+  const handleCopyAbiToForm = () => { setAddForm({ ...addForm, buyIn: abiBi, markup: abiMu, maxSold: abiSold, actuallySold: '0' }); };
 
   const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
@@ -318,31 +291,72 @@ export default function PokerDashboard() {
     return null;
   };
 
-  if (isLoading) {
-    return <div className="min-h-screen bg-[#050505] text-yellow-500 flex items-center justify-center font-black uppercase tracking-widest text-xl animate-pulse">Ładowanie kokpitu... 🚀</div>;
-  }
+  if (isLoading) return <div className="min-h-screen bg-[#050505] text-yellow-500 flex items-center justify-center font-black uppercase tracking-widest text-xl animate-pulse">Ładowanie kokpitu... 🚀</div>;
 
   const activeOffersCount = tournaments.filter(t => !t.is_finished && Number(t.sold_percent !== null ? t.sold_percent : t.max_sell_percent) < Number(t.max_sell_percent || 0)).length;
-
   const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const displayedTournaments = tournaments.filter(t => {
     if (activeTab === 'history') {
       if (!t.is_finished) return false;
       const tDate = t.scheduled_date ? new Date(t.scheduled_date).getTime() : new Date(t.created_at).getTime();
-      
       if (archiveFrom && tDate < new Date(archiveFrom).getTime()) return false;
       if (archiveTo && tDate > new Date(archiveTo + 'T23:59:59').getTime()) return false;
       return true;
     } else {
       if (!t.is_finished) return true;
-      const tDate = t.scheduled_date ? new Date(t.scheduled_date) : new Date(t.created_at);
-      return tDate > yesterday;
+      return (t.scheduled_date ? new Date(t.scheduled_date) : new Date(t.created_at)) > yesterday;
     }
   });
 
   return (
     <main className="min-h-screen bg-[#050505] text-white p-4 md:p-8 font-sans pb-20">
       
+      {/* MODAL MASOWEGO DODAWANIA (BATCH INSERT) */}
+      {showBatchModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
+          <div className="bg-[#111] border border-yellow-500/30 p-6 rounded-3xl w-full max-w-2xl flex flex-col max-h-[90vh]">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-black text-2xl text-yellow-500 italic uppercase">📦 Kreator Pakietu</h3>
+              <button onClick={()=>setShowBatchModal(false)} className="text-gray-500 hover:text-white text-xl">X</button>
+            </div>
+            
+            <p className="text-sm text-gray-400 mb-4">Zaznacz turnieje, które chcesz zagrać, ustaw parametry dla całego pakietu i dodaj wszystkie jednym kliknięciem.</p>
+            
+            <div className="grid grid-cols-3 gap-3 mb-6 bg-black/50 p-4 rounded-xl border border-gray-800">
+              <div>
+                <label className="text-[10px] text-gray-500 uppercase font-bold pl-1">Markup (Dla wszystkich)</label>
+                <input type="number" step="0.01" value={batchForm.markup} onChange={e=>setBatchForm({...batchForm, markup:e.target.value})} className="w-full p-3 bg-[#0a0a0a] border border-gray-800 rounded-lg outline-none" />
+              </div>
+              <div>
+                <label className="text-[10px] text-gray-500 uppercase font-bold pl-1">Oferta (Max %)</label>
+                <input type="number" value={batchForm.maxSold} onChange={e=>setBatchForm({...batchForm, maxSold:e.target.value})} className="w-full p-3 bg-[#0a0a0a] border border-gray-800 rounded-lg outline-none" />
+              </div>
+              <div>
+                <label className="text-[10px] text-gray-500 uppercase font-bold pl-1">Data Startu (Opcjonalnie)</label>
+                <input type="date" value={batchForm.scheduledDate} onChange={e=>setBatchForm({...batchForm, scheduledDate:e.target.value})} className="w-full p-3 bg-[#0a0a0a] border border-gray-800 rounded-lg outline-none text-sm" />
+              </div>
+            </div>
+
+            <h4 className="font-bold text-xs uppercase tracking-widest text-gray-500 mb-2">Wybierz z bazy ({batchSelection.length} zaznaczonych)</h4>
+            <div className="flex-1 overflow-y-auto bg-black/30 border border-gray-800 rounded-xl p-2 space-y-1 mb-4 custom-scrollbar">
+              {templates.length === 0 && <p className="text-gray-600 text-xs p-4 text-center">Baza jest pusta. Dodaj szablony najpierw.</p>}
+              {templates.map(t => (
+                <label key={t.id} className="flex items-center gap-3 p-3 hover:bg-gray-900/50 rounded-lg cursor-pointer transition">
+                  <input type="checkbox" checked={batchSelection.includes(t.id)} onChange={() => toggleBatchSelection(t.id)} className="w-5 h-5 accent-yellow-500 rounded bg-black border-gray-700" />
+                  <span className="font-bold">{t.name} <span className="text-gray-500 font-normal ml-2">(${t.default_buy_in})</span></span>
+                </label>
+              ))}
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button onClick={()=>setShowBatchModal(false)} className="flex-1 bg-gray-800 p-4 rounded-xl font-bold uppercase tracking-widest">Anuluj</button>
+              <button onClick={handleBatchInsert} className="flex-[2] bg-yellow-500 text-black p-4 rounded-xl font-black uppercase tracking-widest hover:scale-[1.02] transition">Wystaw {batchSelection.length} Gier</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* INNE MODALE */}
       {showAdjModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
           <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-sm"><h3 className="font-black text-xl mb-4 text-blue-400 italic">Korekta Bankrollu</h3>
@@ -663,7 +677,15 @@ export default function PokerDashboard() {
                   </button>
                 </div>
 
-                <div className="bg-yellow-500 p-6 rounded-3xl text-black italic font-bold uppercase shadow-2xl">
+                <div className="bg-yellow-500 p-6 rounded-3xl text-black italic font-bold uppercase shadow-2xl relative">
+                  
+                  {/* PRZYCISK MASOWEGO DODAWANIA */}
+                  <div className="absolute -top-3 -right-3">
+                    <button onClick={() => setShowBatchModal(true)} className="bg-white text-black px-4 py-2 rounded-xl font-black text-xs border-[3px] border-[#050505] shadow-lg hover:scale-105 transition-transform uppercase tracking-widest">
+                      📦 Masowo
+                    </button>
+                  </div>
+
                   <h3 className="font-black text-xl mb-4">Dodaj Sesję</h3>
                   <div className="space-y-4">
                     <div>
@@ -682,7 +704,7 @@ export default function PokerDashboard() {
                       <div className="bg-black p-2 rounded-xl text-center border border-yellow-500"><label className="text-[9px] uppercase font-bold text-yellow-500 block mb-1">Sprzedano %</label><input type="number" value={addForm.actuallySold} onChange={e => setAddForm({...addForm, actuallySold: e.target.value})} className="w-full bg-transparent text-center font-black text-yellow-500 outline-none" /></div>
                     </div>
                     <input type="datetime-local" value={addForm.scheduledDate} onChange={e => setAddForm({...addForm, scheduledDate: e.target.value})} className="w-full p-3 rounded-xl bg-black/10 outline-none text-xs" />
-                    <button onClick={addTournament} className="w-full bg-black text-white font-black py-4 rounded-xl tracking-widest hover:scale-[1.02] transition-transform">Dodaj do Bazy</button>
+                    <button onClick={addTournament} className="w-full bg-black text-white font-black py-4 rounded-xl tracking-widest hover:scale-[1.02] transition-transform">Dodaj Pojedynczo</button>
                   </div>
                 </div>
               </>
