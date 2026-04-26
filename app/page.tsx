@@ -19,6 +19,9 @@ export default function PokerDashboard() {
   
   const [startBankroll, setStartBankroll] = useState(338.17);
   const [timeFilter, setTimeFilter] = useState('all');
+  
+  // NOWE: Zakładki na liście (Live vs Archiwum)
+  const [activeTab, setActiveTab] = useState<'live' | 'history'>('live');
 
   const [authForm, setAuthForm] = useState({ email: '', password: '' });
   const [addForm, setAddForm] = useState({ name: '', buyIn: '', markup: '1.0', maxSold: '0', actuallySold: '0', scheduledDate: '' });
@@ -51,25 +54,14 @@ export default function PokerDashboard() {
     };
     initialize();
     
-    // 🔥 MAGIA REAL-TIME SUPABASE 🔥
     const channel = supabase.channel('public-tracker')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tournaments' }, () => {
-        loadInitialData(); // Odśwież wykres i listę u wszystkich!
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'bankroll_adjustments' }, () => {
-        loadInitialData();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, () => {
-        loadInitialData();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'shoutbox' }, () => {
-        fetchChat(); // Odśwież czat natychmiast u wszystkich!
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tournaments' }, () => loadInitialData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bankroll_adjustments' }, () => loadInitialData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, () => loadInitialData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'shoutbox' }, () => fetchChat())
       .subscribe();
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, []);
 
   useEffect(() => {
@@ -108,11 +100,11 @@ export default function PokerDashboard() {
   };
 
   const handleEditStartBankroll = async () => {
-    const val = prompt("Podaj nowy BAZOWY bankroll startowy:", startBankroll.toString());
+    const val = prompt("Podaj nowy BAZOWY bankroll startowy (od niego będzie liczyć wykres):", startBankroll.toString());
     if (val !== null && !isNaN(Number(val))) {
       const num = parseFloat(Number(val).toFixed(2));
       const { error } = await supabase.from('settings').upsert({ id: 'start_bankroll', value: num });
-      if (error) alert("Błąd: " + error.message);
+      if (error) alert("Błąd bazy: " + error.message);
     }
   };
 
@@ -302,9 +294,24 @@ export default function PokerDashboard() {
     return <div className="min-h-screen bg-[#050505] text-yellow-500 flex items-center justify-center font-black uppercase tracking-widest text-xl animate-pulse">Ładowanie kokpitu... 🚀</div>;
   }
 
+  const activeOffersCount = tournaments.filter(t => !t.is_finished && Number(t.sold_percent !== null ? t.sold_percent : t.max_sell_percent) < Number(t.max_sell_percent || 0)).length;
+
+  // FILTROWANIE ZAKŁADEK
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const displayedTournaments = tournaments.filter(t => {
+    if (activeTab === 'history') {
+      return t.is_finished;
+    } else {
+      if (!t.is_finished) return true;
+      const tDate = t.scheduled_date ? new Date(t.scheduled_date) : new Date(t.created_at);
+      return tDate > yesterday; // Pokazuje rozliczone tylko do 24h wstecz w "Live"
+    }
+  });
+
   return (
     <main className="min-h-screen bg-[#050505] text-white p-4 md:p-8 font-sans pb-20">
       
+      {/* MODAL KOREKTY */}
       {showAdjModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
           <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-sm"><h3 className="font-black text-xl mb-4 text-blue-400 italic">Korekta Bankrollu</h3>
@@ -315,6 +322,7 @@ export default function PokerDashboard() {
         </div>
       )}
 
+      {/* MODAL ROZLICZANIA */}
       {settleModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
           <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-sm">
@@ -338,6 +346,7 @@ export default function PokerDashboard() {
         </div>
       )}
 
+      {/* MODAL SZABLONÓW */}
       {showTemplatesModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
           <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-lg">
@@ -348,6 +357,7 @@ export default function PokerDashboard() {
         </div>
       )}
 
+      {/* MODAL EDYCJI */}
       {editingTourney && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
           <div className="bg-[#111] border border-yellow-500/30 p-6 rounded-3xl w-full max-w-md">
@@ -425,9 +435,28 @@ export default function PokerDashboard() {
           
           {/* LISTA TURNIEJÓW */}
           <div className="lg:col-span-2">
-            <h3 className="text-xl font-bold uppercase italic mb-4">📋 Oferta & Status Live</h3>
+            
+            {/* ZAKŁADKI (TABS) */}
+            <div className="flex justify-between items-center mb-6 border-b border-gray-800 pb-2">
+              <div className="flex gap-6">
+                <button onClick={() => setActiveTab('live')} className={`text-lg font-black uppercase italic transition-colors ${activeTab === 'live' ? 'text-yellow-500 border-b-2 border-yellow-500 pb-2 -mb-[10px]' : 'text-gray-600 hover:text-gray-400'}`}>
+                  🔴 Live & Oferty
+                </button>
+                <button onClick={() => setActiveTab('history')} className={`text-lg font-black uppercase italic transition-colors ${activeTab === 'history' ? 'text-yellow-500 border-b-2 border-yellow-500 pb-2 -mb-[10px]' : 'text-gray-600 hover:text-gray-400'}`}>
+                  📚 Archiwum
+                </button>
+              </div>
+              {activeTab === 'live' && <span className="text-[10px] text-gray-500 uppercase font-bold tracking-widest bg-gray-900 px-2 py-1 rounded-lg">Dostępne: <span className="text-amber-400">{activeOffersCount}</span></span>}
+            </div>
+
             <div className="space-y-3">
-              {tournaments.map((t) => {
+              {displayedTournaments.length === 0 && (
+                <div className="text-center p-10 border border-dashed border-gray-800 rounded-3xl text-gray-600 italic">
+                  Brak turniejów do wyświetlenia w tej zakładce.
+                </div>
+              )}
+
+              {displayedTournaments.map((t) => {
                 const maxSold = Number(t.max_sell_percent || 0);
                 const actSold = Number(t.sold_percent !== null ? t.sold_percent : maxSold);
                 const kept = 100 - actSold;
