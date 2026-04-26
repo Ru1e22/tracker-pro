@@ -17,7 +17,8 @@ export default function PokerDashboard() {
   const [chartData, setChartData] = useState<any[]>([]);
   const [stats, setStats] = useState({ profit: 0, roi: 0, itm: 0, count: 0 });
   
-  const [startBankroll, setStartBankroll] = useState(337.29);
+  // Zmieniony domyślny fallback
+  const [startBankroll, setStartBankroll] = useState(338.17);
   const [timeFilter, setTimeFilter] = useState('all');
 
   const [authForm, setAuthForm] = useState({ email: '', password: '' });
@@ -76,19 +77,24 @@ export default function PokerDashboard() {
 
   const loadInitialData = async () => {
     const { data: setItem } = await supabase.from('settings').select('*').eq('id', 'start_bankroll').single();
-    let baseBR = 337.29;
+    let baseBR = 338.17;
     if (setItem) baseBR = Number(setItem.value);
     setStartBankroll(baseBR);
     await fetchData(baseBR);
   };
 
+  // NAPRAWIONE: Obsługa błędów przy zmianie bankrolla
   const handleEditStartBankroll = async () => {
-    const val = prompt("Podaj nowy BAZOWY bankroll startowy:", startBankroll.toString());
+    const val = prompt("Podaj nowy BAZOWY bankroll startowy (od niego będzie liczyć wykres):", startBankroll.toString());
     if (val !== null && !isNaN(Number(val))) {
       const num = parseFloat(Number(val).toFixed(2));
-      await supabase.from('settings').upsert({ id: 'start_bankroll', value: num });
-      setStartBankroll(num);
-      fetchData(num);
+      const { error } = await supabase.from('settings').upsert({ id: 'start_bankroll', value: num });
+      if (error) {
+        alert("Błąd bazy danych przy zmianie bankrolla: " + error.message);
+      } else {
+        setStartBankroll(num);
+        fetchData(num);
+      }
     }
   };
 
@@ -158,7 +164,6 @@ export default function PokerDashboard() {
 
     let currentBR = baselineBR;
     
-    // Używamy indeksu jako X-Axis żeby uniknąć połykania punktów o tej samej dacie!
     const processedChart = filteredEvents.map((item, index) => {
       currentBR += item.preCalcNet;
       const dStr = item.dateObj.toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
@@ -204,8 +209,20 @@ export default function PokerDashboard() {
     if(newTemplate.name) { await supabase.from('tournament_templates').insert([{ name: newTemplate.name, default_buy_in: parseFloat(newTemplate.buyIn || '0') }]); setNewTemplate({ name: '', buyIn: '' }); fetchTemplates(); }
   };
   
+  // NAPRAWIONE: Obsługa błędów przy korekcie
   const saveAdjustment = async () => {
-    if(adjForm.amount && adjForm.reason) { await supabase.from('bankroll_adjustments').insert([{ amount: parseFloat(adjForm.amount), reason: adjForm.reason }]); setShowAdjModal(false); setAdjForm({ amount: '', reason: '' }); fetchData(startBankroll); }
+    if(adjForm.amount && adjForm.reason) { 
+      const { error } = await supabase.from('bankroll_adjustments').insert([{ amount: parseFloat(adjForm.amount), reason: adjForm.reason }]); 
+      if (error) {
+        alert("Błąd zapisu korekty: " + error.message);
+      } else {
+        setShowAdjModal(false); 
+        setAdjForm({ amount: '', reason: '' }); 
+        fetchData(startBankroll); 
+      }
+    } else {
+      alert("Wpisz kwotę i powód!");
+    }
   };
 
   const CustomTooltip = ({ active, payload }: any) => {
@@ -237,7 +254,7 @@ export default function PokerDashboard() {
     <main className="min-h-screen bg-[#050505] text-white p-4 md:p-8 font-sans pb-20">
       
       {showAdjModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
           <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-sm"><h3 className="font-black text-xl mb-4 text-blue-400 italic">Korekta Bankrollu</h3>
             <input type="number" step="0.01" placeholder="Kwota (np. -50 lub 100)" value={adjForm.amount} onChange={e=>setAdjForm({...adjForm, amount:e.target.value})} className="w-full p-3 bg-black/50 border border-gray-800 rounded-xl mb-2 outline-none" />
             <input type="text" placeholder="Powód (np. Wypłata, Bonus)" value={adjForm.reason} onChange={e=>setAdjForm({...adjForm, reason:e.target.value})} className="w-full p-3 bg-black/50 border border-gray-800 rounded-xl mb-4 outline-none" />
@@ -247,7 +264,7 @@ export default function PokerDashboard() {
       )}
 
       {showTemplatesModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
           <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-lg">
             <div className="flex justify-between mb-4"><h3 className="font-black text-yellow-500 italic">Baza Turniejów</h3><button onClick={()=>setShowTemplatesModal(false)}>X</button></div>
             <div className="flex gap-2 mb-4"><input placeholder="Nazwa" value={newTemplate.name} onChange={e=>setNewTemplate({...newTemplate,name:e.target.value})} className="flex-1 p-2 bg-black/50 border border-gray-800 rounded-lg outline-none" /><input placeholder="BI" type="number" value={newTemplate.buyIn} onChange={e=>setNewTemplate({...newTemplate,buyIn:e.target.value})} className="w-16 p-2 bg-black/50 border border-gray-800 rounded-lg outline-none" /><button onClick={saveNewTemplate} className="bg-yellow-500 text-black px-3 rounded-lg font-bold">Dodaj</button></div>
@@ -257,7 +274,7 @@ export default function PokerDashboard() {
       )}
 
       {editingTourney && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
           <div className="bg-[#111] border border-yellow-500/30 p-6 rounded-3xl w-full max-w-md">
             <h3 className="font-black text-xl mb-4 text-yellow-500 italic">Edytuj Grę</h3>
             <input value={editingTourney.name} onChange={e=>setEditingTourney({...editingTourney,name:e.target.value})} className="w-full p-3 bg-black/50 border border-gray-800 rounded-xl mb-2" />
