@@ -13,6 +13,7 @@ export default function PokerDashboard() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [tournaments, setTournaments] = useState<any[]>([]);
   const [templates, setTemplates] = useState<any[]>([]);
+  const [adjustments, setAdjustments] = useState<any[]>([]);
   const [rawTimeline, setRawTimeline] = useState<any[]>([]);
   const [chartData, setChartData] = useState<any[]>([]);
   const [stats, setStats] = useState({ profit: 0, roi: 0, itm: 0, count: 0 });
@@ -41,7 +42,6 @@ export default function PokerDashboard() {
   const [chatInput, setChatInput] = useState('');
   const [chatNick, setChatNick] = useState('');
 
-  // Dwukierunkowy Kalkulator ABI
   const [abiBi, setAbiBi] = useState('');
   const [abiMu, setAbiMu] = useState('1.0');
   const [abiTarget, setAbiTarget] = useState('1.00');
@@ -115,6 +115,8 @@ export default function PokerDashboard() {
     const { data: tData } = await supabase.from('tournaments').select('*');
     const { data: aData } = await supabase.from('bankroll_adjustments').select('*');
     if (!tData) return;
+
+    setAdjustments(aData || []);
 
     const timeline: any[] = [
       ...tData.map(t => ({ type: 'tournament', dateObj: t.scheduled_date ? new Date(t.scheduled_date) : new Date(t.created_at), data: t })),
@@ -256,11 +258,16 @@ export default function PokerDashboard() {
     if(adjForm.amount && adjForm.reason) { 
       const { error } = await supabase.from('bankroll_adjustments').insert([{ amount: parseFloat(adjForm.amount), reason: adjForm.reason }]); 
       if (error) alert("Błąd: " + error.message);
-      else { setShowAdjModal(false); setAdjForm({ amount: '', reason: '' }); }
+      else { setAdjForm({ amount: '', reason: '' }); }
     } else alert("Wpisz kwotę i powód!");
   };
 
-  // Zaktualizowany Inteligentny Kalkulator ABI (Dwukierunkowy)
+  const deleteAdjustment = async (id: string) => {
+    if (confirm("Na pewno usunąć tę korektę?")) {
+      await supabase.from('bankroll_adjustments').delete().eq('id', id);
+    }
+  };
+
   const updateAbi = (field: 'bi' | 'mu' | 'target' | 'sold', value: string) => {
     const bi = field === 'bi' ? parseFloat(value) || 0 : parseFloat(abiBi) || 0;
     const mu = field === 'mu' ? parseFloat(value) || 1 : parseFloat(abiMu) || 1;
@@ -273,13 +280,11 @@ export default function PokerDashboard() {
     if (field === 'sold') setAbiSold(value);
 
     if (field === 'bi' || field === 'mu' || field === 'target') {
-      // Obliczamy % do sprzedania na podstawie Target ABI
       if (bi > 0 && mu > 0) {
         let s = ((bi - target) / (bi * mu)) * 100;
         setAbiSold(Math.max(0, Math.min(100, s)).toFixed(1));
       } else setAbiSold('0.0');
     } else if (field === 'sold') {
-      // Obliczamy nowy Target ABI na podstawie wpisanego %
       if (bi > 0) {
         let t = bi - (bi * (sold / 100) * mu);
         setAbiTarget(t.toFixed(2));
@@ -335,12 +340,39 @@ export default function PokerDashboard() {
   return (
     <main className="min-h-screen bg-[#050505] text-white p-4 md:p-8 font-sans pb-20">
       
+      {/* MODAL KOREKTY Z HISTORIĄ */}
       {showAdjModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
-          <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-sm"><h3 className="font-black text-xl mb-4 text-blue-400 italic">Korekta Bankrollu</h3>
-            <input type="number" step="0.01" placeholder="Kwota (np. -50 lub 100)" value={adjForm.amount} onChange={e=>setAdjForm({...adjForm, amount:e.target.value})} className="w-full p-3 bg-black/50 border border-gray-800 rounded-xl mb-2 outline-none" />
-            <input type="text" placeholder="Powód (np. Wypłata, Bonus)" value={adjForm.reason} onChange={e=>setAdjForm({...adjForm, reason:e.target.value})} className="w-full p-3 bg-black/50 border border-gray-800 rounded-xl mb-4 outline-none" />
-            <div className="flex gap-2"><button onClick={()=>setShowAdjModal(false)} className="flex-1 bg-gray-800 p-3 rounded-xl font-bold">Anuluj</button><button onClick={saveAdjustment} className="flex-1 bg-blue-500 text-black p-3 rounded-xl font-bold">Zapisz</button></div>
+          <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-md">
+            <div className="flex justify-between mb-4">
+              <h3 className="font-black text-xl text-blue-400 italic">Korekta (+/-)</h3>
+              <button onClick={() => setShowAdjModal(false)} className="text-gray-500 hover:text-white">X</button>
+            </div>
+            
+            <div className="space-y-3 mb-6">
+              <input type="number" step="0.01" placeholder="Kwota (np. -50 lub 100)" value={adjForm.amount} onChange={e=>setAdjForm({...adjForm, amount:e.target.value})} className="w-full p-3 bg-black/50 border border-gray-800 rounded-xl outline-none" />
+              <input type="text" placeholder="Powód (np. Wypłata, Bonus)" value={adjForm.reason} onChange={e=>setAdjForm({...adjForm, reason:e.target.value})} className="w-full p-3 bg-black/50 border border-gray-800 rounded-xl outline-none" />
+              <button onClick={saveAdjustment} className="w-full bg-blue-500 text-black p-3 rounded-xl font-bold uppercase tracking-widest hover:bg-blue-400">Dodaj Korektę</button>
+            </div>
+
+            {adjustments.length > 0 && (
+              <div className="border-t border-gray-800 pt-4">
+                <h4 className="font-bold text-xs text-gray-500 uppercase tracking-widest mb-3">Historia Korekt</h4>
+                <div className="max-h-48 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
+                  {adjustments.sort((a,b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map(a => (
+                    <div key={a.id} className="flex justify-between items-center bg-black/30 p-3 rounded-xl border border-gray-800/50">
+                      <div>
+                        <p className={`font-black text-sm ${a.amount >= 0 ? 'text-green-400' : 'text-red-500'}`}>
+                          {a.amount >= 0 ? '+' : ''}{a.amount}
+                        </p>
+                        <p className="text-[10px] text-gray-400">{a.reason}</p>
+                      </div>
+                      <button onClick={() => deleteAdjustment(a.id)} className="text-red-500 text-[10px] font-bold px-2 py-1 uppercase border border-red-500/20 rounded hover:bg-red-500/10 transition">Usuń</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -415,7 +447,7 @@ export default function PokerDashboard() {
           <div className="bg-[#0f0f0f] border border-gray-800 p-4 rounded-3xl relative flex flex-col justify-center">
             <p className="text-[10px] text-gray-500 mb-1 flex justify-center items-center gap-2">
               Bankroll
-              {isAdmin && <button onClick={()=>setShowAdjModal(true)} className="text-blue-500 text-[10px] border border-blue-500/30 rounded px-1 hover:bg-blue-500/10">➕ Korekta</button>}
+              {isAdmin && <button onClick={()=>setShowAdjModal(true)} className="text-blue-500 text-[10px] border border-blue-500/30 rounded px-1 hover:bg-blue-500/10 transition">➕ Korekta</button>}
             </p>
             <p className="text-2xl font-black">${(startBankroll + rawTimeline.reduce((sum, item)=>{
               if(item.type==='adjustment') return sum+Number(item.data.amount); 
@@ -423,7 +455,7 @@ export default function PokerDashboard() {
               const p = Number(t.prize || 0); const b = Number(t.bounty || 0);
               return sum+(t.is_finished?(((p+b)*(1-Number(t.sold_percent!==null?t.sold_percent:t.max_sell_percent)/100))-(t.buy_in-(t.buy_in*(Number(t.sold_percent!==null?t.sold_percent:t.max_sell_percent)/100)*t.markup))):0);
               },0)).toFixed(2)}</p>
-            <p className="text-[9px] text-gray-600 mt-1 flex justify-center items-center gap-1">Start: ${startBankroll.toFixed(2)} {isAdmin && <button onClick={handleEditStartBankroll} className="text-yellow-500 hover:text-yellow-400 text-xs">✏️</button>}</p>
+            <p className="text-[9px] text-gray-600 mt-1 flex justify-center items-center gap-1">Start: ${startBankroll.toFixed(2)} {isAdmin && <button onClick={handleEditStartBankroll} className="text-yellow-500 hover:text-yellow-400 text-xs transition">✏️</button>}</p>
           </div>
         </div>
 
