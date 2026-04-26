@@ -9,6 +9,7 @@ const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 export default function PokerDashboard() {
+  const [isLoading, setIsLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [tournaments, setTournaments] = useState<any[]>([]);
   const [templates, setTemplates] = useState<any[]>([]);
@@ -32,9 +33,15 @@ export default function PokerDashboard() {
   const [chatNick, setChatNick] = useState('');
 
   useEffect(() => {
-    checkUser();
-    loadInitialData();
-    fetchChat();
+    const initialize = async () => {
+      await checkUser();
+      await fetchTemplates();
+      await loadInitialData();
+      await fetchChat();
+      setIsLoading(false);
+    };
+    initialize();
+    
     const chatInterval = setInterval(fetchChat, 10000);
     return () => clearInterval(chatInterval);
   }, []);
@@ -72,9 +79,17 @@ export default function PokerDashboard() {
     let baseBR = 337.29;
     if (setItem) baseBR = Number(setItem.value);
     setStartBankroll(baseBR);
-    
-    fetchData(baseBR);
-    fetchTemplates();
+    await fetchData(baseBR);
+  };
+
+  const handleEditStartBankroll = async () => {
+    const val = prompt("Podaj nowy BAZOWY bankroll startowy:", startBankroll.toString());
+    if (val !== null && !isNaN(Number(val))) {
+      const num = parseFloat(Number(val).toFixed(2));
+      await supabase.from('settings').upsert({ id: 'start_bankroll', value: num });
+      setStartBankroll(num);
+      fetchData(num);
+    }
   };
 
   const fetchData = async (baseBR: number) => {
@@ -142,13 +157,15 @@ export default function PokerDashboard() {
     });
 
     let currentBR = baselineBR;
-    const processedChart = filteredEvents.map((item) => {
+    
+    // Używamy indeksu jako X-Axis żeby uniknąć połykania punktów o tej samej dacie!
+    const processedChart = filteredEvents.map((item, index) => {
       currentBR += item.preCalcNet;
-      const dStr = item.dateObj.toLocaleString('pl-PL', { day: '2-digit', month: '2-digit' });
+      const dStr = item.dateObj.toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
       if (item.type === 'adjustment') {
-        return { name: dStr, net: item.preCalcNet, bankroll: currentBR, isAdj: true, reason: item.data.reason };
+        return { index: index + 1, dateStr: dStr, net: item.preCalcNet, bankroll: currentBR, isAdj: true, reason: item.data.reason };
       } else {
-        return { name: dStr, net: item.preCalcNet, bankroll: currentBR, isAdj: false, tourneyName: item.data.name };
+        return { index: index + 1, dateStr: dStr, net: item.preCalcNet, bankroll: currentBR, isAdj: false, tourneyName: item.data.name };
       }
     });
 
@@ -158,7 +175,7 @@ export default function PokerDashboard() {
       itm: finishedCount > 0 ? (cashed / finishedCount) * 100 : 0,
       count: finishedCount
     });
-    setChartData([{ name: 'Start Okresu', bankroll: baselineBR, isStart: true }, ...processedChart]);
+    setChartData([{ index: 0, dateStr: 'Start Okresu', bankroll: baselineBR, isStart: true }, ...processedChart]);
   };
 
   const toggleDeepRun = async (id: string, currentStatus: string) => {
@@ -197,11 +214,11 @@ export default function PokerDashboard() {
       if (data.isStart) return <div className="bg-[#111] p-3 rounded-xl border border-gray-800"><p className="text-yellow-500 font-bold text-xs">Początek okresu</p><p className="font-black text-white">${data.bankroll.toFixed(2)}</p></div>;
       return (
         <div className="bg-[#111] border border-gray-800 p-3 rounded-xl shadow-xl z-50">
-          <p className="text-gray-400 text-[10px] mb-1">{data.name}</p>
+          <p className="text-gray-400 text-[10px] mb-1">{data.dateStr}</p>
           {data.isAdj ? (
-            <><p className="text-blue-400 font-bold text-xs mb-1">⚙️ Korekta: {data.reason}</p><p className={`font-black ${data.net >= 0 ? 'text-green-400' : 'text-red-500'}`}>{data.net >= 0 ? '+' : ''}${data.net.toFixed(2)}</p></>
+            <><p className="text-blue-400 font-bold text-xs mb-1">⚙️ Korekta: {data.reason}</p><p className={`font-black ${data.net >= 0 ? 'text-green-400' : 'text-red-500'}`}>{data.net >= 0 ? '+' : '-'}${Math.abs(data.net).toFixed(2)}</p></>
           ) : (
-            <><p className="text-white font-bold text-xs mb-1">{data.tourneyName}</p>{data.net !== 0 && (<p className={`font-black ${data.net > 0 ? 'text-green-400' : 'text-red-500'}`}>{data.net > 0 ? 'Zysk: +' : 'Strata: '}${data.net.toFixed(2)}</p>)}</>
+            <><p className="text-white font-bold text-xs mb-1">{data.tourneyName}</p>{data.net !== 0 && (<p className={`font-black ${data.net > 0 ? 'text-green-400' : 'text-red-500'}`}>{data.net > 0 ? 'Zysk: +' : 'Strata: -'}${Math.abs(data.net).toFixed(2)}</p>)}</>
           )}
           <p className="text-yellow-500 font-black mt-2">Bankroll: ${data.bankroll.toFixed(2)}</p>
         </div>
@@ -210,6 +227,10 @@ export default function PokerDashboard() {
     return null;
   };
 
+  if (isLoading) {
+    return <div className="min-h-screen bg-[#050505] text-yellow-500 flex items-center justify-center font-black uppercase tracking-widest text-xl animate-pulse">Ładowanie kokpitu... 🚀</div>;
+  }
+
   const activeOffersCount = tournaments.filter(t => !t.is_finished && Number(t.sold_percent !== null ? t.sold_percent : t.max_sell_percent) < Number(t.max_sell_percent || 0)).length;
 
   return (
@@ -217,9 +238,9 @@ export default function PokerDashboard() {
       
       {showAdjModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4">
-          <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-sm"><h3 className="font-black text-xl mb-4 text-blue-400 italic">Korekta</h3>
-            <input type="number" placeholder="Kwota" value={adjForm.amount} onChange={e=>setAdjForm({...adjForm, amount:e.target.value})} className="w-full p-3 bg-black/50 border border-gray-800 rounded-xl mb-2 outline-none" />
-            <input type="text" placeholder="Powód" value={adjForm.reason} onChange={e=>setAdjForm({...adjForm, reason:e.target.value})} className="w-full p-3 bg-black/50 border border-gray-800 rounded-xl mb-4 outline-none" />
+          <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-sm"><h3 className="font-black text-xl mb-4 text-blue-400 italic">Korekta Bankrollu</h3>
+            <input type="number" step="0.01" placeholder="Kwota (np. -50 lub 100)" value={adjForm.amount} onChange={e=>setAdjForm({...adjForm, amount:e.target.value})} className="w-full p-3 bg-black/50 border border-gray-800 rounded-xl mb-2 outline-none" />
+            <input type="text" placeholder="Powód (np. Wypłata, Bonus)" value={adjForm.reason} onChange={e=>setAdjForm({...adjForm, reason:e.target.value})} className="w-full p-3 bg-black/50 border border-gray-800 rounded-xl mb-4 outline-none" />
             <div className="flex gap-2"><button onClick={()=>setShowAdjModal(false)} className="flex-1 bg-gray-800 p-3 rounded-xl font-bold">Anuluj</button><button onClick={saveAdjustment} className="flex-1 bg-blue-500 text-black p-3 rounded-xl font-bold">Zapisz</button></div>
           </div>
         </div>
@@ -258,10 +279,17 @@ export default function PokerDashboard() {
         </div>
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8 text-center uppercase italic font-bold">
-          <div className="bg-[#0f0f0f] border border-gray-800 p-4 rounded-3xl"><p className="text-[10px] text-gray-500 mb-1">Zysk Okresu</p><p className={`text-2xl font-black ${stats.profit >= 0 ? 'text-green-400' : 'text-red-500'}`}>${stats.profit.toFixed(2)}</p></div>
-          <div className="bg-[#0f0f0f] border border-gray-800 p-4 rounded-3xl"><p className="text-[10px] text-gray-500 mb-1">ROI Okresu</p><p className="text-2xl font-black text-yellow-500">{stats.roi.toFixed(1)}%</p></div>
-          <div className="bg-[#0f0f0f] border border-gray-800 p-4 rounded-3xl"><p className="text-[10px] text-gray-500 mb-1">ITM Okresu</p><p className="text-2xl font-black text-blue-400">{stats.itm.toFixed(1)}%</p></div>
-          <div className="bg-[#0f0f0f] border border-gray-800 p-4 rounded-3xl relative"><p className="text-[10px] text-gray-500 mb-1 flex justify-center items-center gap-2">Bankroll Aktualny {isAdmin && <button onClick={()=>setShowAdjModal(true)} className="text-yellow-500 text-xs border border-yellow-500/30 rounded px-1">⚙️</button>}</p><p className="text-2xl font-black">${(startBankroll + rawTimeline.reduce((sum, item)=>{if(item.type==='adjustment')return sum+Number(item.data.amount); const t=item.data; return sum+(t.is_finished?((t.winnings*(1-Number(t.sold_percent!==null?t.sold_percent:t.max_sell_percent)/100))-(t.buy_in-(t.buy_in*(Number(t.sold_percent!==null?t.sold_percent:t.max_sell_percent)/100)*t.markup))):0);},0)).toFixed(2)}</p></div>
+          <div className="bg-[#0f0f0f] border border-gray-800 p-4 rounded-3xl flex flex-col justify-center"><p className="text-[10px] text-gray-500 mb-1">Zysk Okresu</p><p className={`text-2xl font-black ${stats.profit >= 0 ? 'text-green-400' : 'text-red-500'}`}>${stats.profit.toFixed(2)}</p></div>
+          <div className="bg-[#0f0f0f] border border-gray-800 p-4 rounded-3xl flex flex-col justify-center"><p className="text-[10px] text-gray-500 mb-1">ROI Okresu</p><p className="text-2xl font-black text-yellow-500">{stats.roi.toFixed(1)}%</p></div>
+          <div className="bg-[#0f0f0f] border border-gray-800 p-4 rounded-3xl flex flex-col justify-center"><p className="text-[10px] text-gray-500 mb-1">ITM Okresu</p><p className="text-2xl font-black text-blue-400">{stats.itm.toFixed(1)}%</p></div>
+          <div className="bg-[#0f0f0f] border border-gray-800 p-4 rounded-3xl relative flex flex-col justify-center">
+            <p className="text-[10px] text-gray-500 mb-1 flex justify-center items-center gap-2">
+              Bankroll
+              {isAdmin && <button onClick={()=>setShowAdjModal(true)} className="text-blue-500 text-[10px] border border-blue-500/30 rounded px-1 hover:bg-blue-500/10">➕ Korekta</button>}
+            </p>
+            <p className="text-2xl font-black">${(startBankroll + rawTimeline.reduce((sum, item)=>{if(item.type==='adjustment')return sum+Number(item.data.amount); const t=item.data; return sum+(t.is_finished?((t.winnings*(1-Number(t.sold_percent!==null?t.sold_percent:t.max_sell_percent)/100))-(t.buy_in-(t.buy_in*(Number(t.sold_percent!==null?t.sold_percent:t.max_sell_percent)/100)*t.markup))):0);},0)).toFixed(2)}</p>
+            <p className="text-[9px] text-gray-600 mt-1 flex justify-center items-center gap-1">Start: ${startBankroll.toFixed(2)} {isAdmin && <button onClick={handleEditStartBankroll} className="text-yellow-500 hover:text-yellow-400 text-xs">✏️</button>}</p>
+          </div>
         </div>
 
         {/* CHART WIDGET */}
@@ -279,7 +307,7 @@ export default function PokerDashboard() {
               <AreaChart data={chartData}>
                 <defs><linearGradient id="colorBR" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#f59e0b" stopOpacity={0.3}/><stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/></linearGradient></defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1f1f1f" vertical={false} />
-                <XAxis dataKey="name" stroke="#444" fontSize={10} axisLine={false} tickLine={false} tick={false} />
+                <XAxis dataKey="index" hide />
                 <YAxis stroke="#444" fontSize={10} axisLine={false} tickLine={false} domain={['auto', 'auto']} tickFormatter={(v) => `$${v}`} />
                 <Tooltip content={<CustomTooltip />} cursor={{ stroke: '#f59e0b', strokeWidth: 1, strokeDasharray: '3 3' }} />
                 <Area type="monotone" dataKey="bankroll" stroke="#f59e0b" strokeWidth={3} fill="url(#colorBR)" />
@@ -306,14 +334,18 @@ export default function PokerDashboard() {
                 const isRunning = !t.is_finished && !isInc && (actSold === maxSold || maxSold === 0);
                 const isDeepRun = t.live_status === 'deep_run';
 
-                // STYLIZACJA STATUSÓW
-                let boxStyle = "bg-[#0f0f0f] border-gray-800"; // Default
+                let boxStyle = "bg-[#0f0f0f] border-gray-800";
                 let statusBadge = null;
 
                 if (t.is_finished) {
                   if (t.winnings > 0) {
-                    boxStyle = "bg-emerald-950/20 border-emerald-900/50";
-                    statusBadge = <span className="text-[12px] font-black text-emerald-400 uppercase tracking-widest">ITM! (+${net.toFixed(2)})</span>;
+                    if (net > 0) {
+                      boxStyle = "bg-emerald-950/20 border-emerald-900/50";
+                      statusBadge = <span className="text-[12px] font-black text-emerald-400 uppercase tracking-widest">ITM! (+${net.toFixed(2)})</span>;
+                    } else {
+                      boxStyle = "bg-[#1a1111] border-red-900/30";
+                      statusBadge = <span className="text-[12px] font-bold text-red-400 uppercase tracking-widest">CASHED (-${Math.abs(net).toFixed(2)})</span>;
+                    }
                   } else {
                     boxStyle = "bg-[#0a0a0a] border-gray-900 opacity-60";
                     statusBadge = <span className="text-[12px] font-bold text-gray-500 uppercase tracking-widest">BUSTED</span>;
@@ -370,7 +402,6 @@ export default function PokerDashboard() {
           {/* SIDEBAR: SHOUTBOX + DODAWANIE */}
           <div className="space-y-6">
             
-            {/* SHOUTBOX */}
             <div className="bg-[#0a0a0a] border border-gray-800 p-4 rounded-3xl flex flex-col h-[400px]">
               <h3 className="font-black text-sm text-yellow-500 uppercase italic mb-3">💬 Rail / Shoutbox</h3>
               <div className="flex-1 overflow-y-auto space-y-3 pr-2 mb-3 custom-scrollbar flex flex-col-reverse">
@@ -394,7 +425,6 @@ export default function PokerDashboard() {
               </form>
             </div>
 
-            {/* DODAWANIE (Tylko Admin) */}
             {isAdmin && (
               <div className="bg-yellow-500 p-6 rounded-3xl text-black italic font-bold uppercase shadow-2xl">
                 <h3 className="font-black text-xl mb-4">Dodaj Sesję</h3>
