@@ -28,8 +28,10 @@ export default function PokerDashboard() {
   const [addForm, setAddForm] = useState({ name: '', buyIn: '', markup: '1.0', maxSold: '0', actuallySold: '0', scheduledDate: '' });
   
   const [editingTourney, setEditingTourney] = useState<any>(null);
+  
+  // Zaktualizowany formularz szablonów (Harmonogram)
   const [showTemplatesModal, setShowTemplatesModal] = useState(false);
-  const [newTemplate, setNewTemplate] = useState({ name: '', buyIn: '' });
+  const [newTemplate, setNewTemplate] = useState({ name: '', buyIn: '', markup: '1.0', targetAbi: '1.0', time: '' });
   
   const [showAdjModal, setShowAdjModal] = useState(false);
   const [adjForm, setAdjForm] = useState({ amount: '', reason: '' });
@@ -37,10 +39,9 @@ export default function PokerDashboard() {
   const [settleModal, setSettleModal] = useState<any>(null);
   const [settleForm, setSettleForm] = useState({ prize: '', bounty: '' });
 
-  // NOWE: Stany do Masowego Dodawania (Batch Insert)
+  // Inteligentny Kreator Sesji (Rutyna)
   const [showBatchModal, setShowBatchModal] = useState(false);
   const [batchSelection, setBatchSelection] = useState<string[]>([]);
-  const [batchForm, setBatchForm] = useState({ markup: '1.0', maxSold: '0', scheduledDate: '' });
 
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [chatInput, setChatInput] = useState('');
@@ -99,7 +100,7 @@ export default function PokerDashboard() {
   };
 
   const fetchTemplates = async () => {
-    const { data } = await supabase.from('tournament_templates').select('*').order('name', { ascending: true });
+    const { data } = await supabase.from('tournament_templates').select('*').order('default_time', { ascending: true, nullsFirst: false });
     setTemplates(data || []);
   };
 
@@ -112,7 +113,7 @@ export default function PokerDashboard() {
   };
 
   const handleEditStartBankroll = async () => {
-    const val = prompt("Podaj nowy BAZOWY bankroll startowy:", startBankroll.toString());
+    const val = prompt("Podaj nowy BAZOWY bankroll startowy (od niego będzie liczyć wykres):", startBankroll.toString());
     if (val !== null && !isNaN(Number(val))) {
       const num = parseFloat(Number(val).toFixed(2));
       const { error } = await supabase.from('settings').upsert({ id: 'start_bankroll', value: num });
@@ -203,19 +204,39 @@ export default function PokerDashboard() {
     setAddForm({ name: '', buyIn: '', markup: '1.0', maxSold: '0', actuallySold: '0', scheduledDate: '' });
   };
 
-  // NOWE: Funkcja Masowego Wrzucania
+  // 🔥 INTELIGENTNA RUTYNA (Generowanie Sesji) 🔥
   const handleBatchInsert = async () => {
-    if (batchSelection.length === 0) return alert("Nie wybrałeś żadnego turnieju z bazy!");
+    if (batchSelection.length === 0) return alert("Wybierz turnieje z rutyny!");
     
     const insertData = batchSelection.map(tempId => {
       const tmpl = templates.find(t => t.id === tempId);
+      
+      // Wyliczanie daty startu na podstawie godziny z szablonu
+      let scheduledISO = null;
+      if (tmpl.default_time) {
+        const [hours, minutes] = tmpl.default_time.split(':');
+        const d = new Date();
+        d.setHours(parseInt(hours, 10), parseInt(minutes, 10), 0, 0);
+        scheduledISO = d.toISOString();
+      }
+
+      // Automatyczne wyliczanie % sprzedaży pod Target ABI
+      const bi = parseFloat(tmpl.default_buy_in || '0');
+      const mu = parseFloat(tmpl.default_markup || '1.0');
+      const target = parseFloat(tmpl.target_abi || '1.0');
+      let calcSold = 0;
+      if (bi > 0 && mu > 0) {
+        const s = ((bi - target) / (bi * mu)) * 100;
+        calcSold = Math.max(0, Math.min(100, s));
+      }
+
       return {
         name: tmpl.name,
-        buy_in: tmpl.default_buy_in,
-        markup: parseFloat(batchForm.markup),
-        max_sell_percent: parseFloat(batchForm.maxSold),
-        sold_percent: 0, // Domyślnie startujemy od 0% sprzedanych
-        scheduled_date: batchForm.scheduledDate ? new Date(batchForm.scheduledDate).toISOString() : null,
+        buy_in: bi,
+        markup: mu,
+        max_sell_percent: parseFloat(calcSold.toFixed(1)),
+        sold_percent: 0,
+        scheduled_date: scheduledISO,
         is_finished: false,
         live_status: 'normal'
       };
@@ -225,9 +246,8 @@ export default function PokerDashboard() {
     if (!error) {
       setShowBatchModal(false);
       setBatchSelection([]);
-      alert(`Pomyślnie wystawiono pakiet ${insertData.length} turniejów!`);
     } else {
-      alert("Błąd masowego dodawania: " + error.message);
+      alert("Błąd bazy: " + error.message);
     }
   };
 
@@ -253,8 +273,24 @@ export default function PokerDashboard() {
   };
 
   const deleteTournament = async (id: string) => { if (confirm("Na pewno usunąć?")) { await supabase.from('tournaments').delete().eq('id', id); } };
-  const saveNewTemplate = async () => { if(newTemplate.name) { await supabase.from('tournament_templates').insert([{ name: newTemplate.name, default_buy_in: parseFloat(newTemplate.buyIn || '0') }]); setNewTemplate({ name: '', buyIn: '' }); fetchTemplates(); } };
+  
+  // Zapisywanie nowego inteligentnego szablonu
+  const saveNewTemplate = async () => {
+    if(newTemplate.name) { 
+      await supabase.from('tournament_templates').insert([{ 
+        name: newTemplate.name, 
+        default_buy_in: parseFloat(newTemplate.buyIn || '0'),
+        default_markup: parseFloat(newTemplate.markup || '1.0'),
+        target_abi: parseFloat(newTemplate.targetAbi || '1.0'),
+        default_time: newTemplate.time || null
+      }]); 
+      setNewTemplate({ name: '', buyIn: '', markup: '1.0', targetAbi: '1.0', time: '' }); 
+      fetchTemplates(); 
+    }
+  };
+
   const saveAdjustment = async () => { if(adjForm.amount && adjForm.reason) { const { error } = await supabase.from('bankroll_adjustments').insert([{ amount: parseFloat(adjForm.amount), reason: adjForm.reason }]); if (error) alert("Błąd: " + error.message); else { setShowAdjModal(false); setAdjForm({ amount: '', reason: '' }); } } else alert("Wpisz kwotę i powód!"); };
+  const deleteAdjustment = async (id: string) => { if (confirm("Na pewno usunąć tę korektę?")) { await supabase.from('bankroll_adjustments').delete().eq('id', id); } };
 
   const updateAbi = (field: 'bi' | 'mu' | 'target' | 'sold', value: string) => {
     const bi = field === 'bi' ? parseFloat(value) || 0 : parseFloat(abiBi) || 0;
@@ -311,52 +347,95 @@ export default function PokerDashboard() {
   return (
     <main className="min-h-screen bg-[#050505] text-white p-4 md:p-8 font-sans pb-20">
       
-      {/* MODAL MASOWEGO DODAWANIA (BATCH INSERT) */}
+      {/* 🚀 KREATOR SESJI / RUTYNA */}
       {showBatchModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
           <div className="bg-[#111] border border-yellow-500/30 p-6 rounded-3xl w-full max-w-2xl flex flex-col max-h-[90vh]">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="font-black text-2xl text-yellow-500 italic uppercase">📦 Kreator Pakietu</h3>
-              <button onClick={()=>setShowBatchModal(false)} className="text-gray-500 hover:text-white text-xl">X</button>
+              <h3 className="font-black text-2xl text-yellow-500 italic uppercase">🚀 Generuj Sesję</h3>
+              <button onClick={()=>setShowBatchModal(false)} className="text-gray-500 hover:text-white text-xl font-bold">X</button>
             </div>
             
-            <p className="text-sm text-gray-400 mb-4">Zaznacz turnieje, które chcesz zagrać, ustaw parametry dla całego pakietu i dodaj wszystkie jednym kliknięciem.</p>
+            <p className="text-sm text-gray-400 mb-4">Wybierz gry na dzisiaj. Aplikacja sama wyliczy procenty sprzedaży na podstawie Twoich ustawień (Target ABI i Markup).</p>
             
-            <div className="grid grid-cols-3 gap-3 mb-6 bg-black/50 p-4 rounded-xl border border-gray-800">
-              <div>
-                <label className="text-[10px] text-gray-500 uppercase font-bold pl-1">Markup (Dla wszystkich)</label>
-                <input type="number" step="0.01" value={batchForm.markup} onChange={e=>setBatchForm({...batchForm, markup:e.target.value})} className="w-full p-3 bg-[#0a0a0a] border border-gray-800 rounded-lg outline-none" />
-              </div>
-              <div>
-                <label className="text-[10px] text-gray-500 uppercase font-bold pl-1">Oferta (Max %)</label>
-                <input type="number" value={batchForm.maxSold} onChange={e=>setBatchForm({...batchForm, maxSold:e.target.value})} className="w-full p-3 bg-[#0a0a0a] border border-gray-800 rounded-lg outline-none" />
-              </div>
-              <div>
-                <label className="text-[10px] text-gray-500 uppercase font-bold pl-1">Data Startu (Opcjonalnie)</label>
-                <input type="date" value={batchForm.scheduledDate} onChange={e=>setBatchForm({...batchForm, scheduledDate:e.target.value})} className="w-full p-3 bg-[#0a0a0a] border border-gray-800 rounded-lg outline-none text-sm" />
+            <div className="flex justify-between items-center mb-2 px-2">
+              <h4 className="font-bold text-xs uppercase tracking-widest text-gray-500">Twój Harmonogram</h4>
+              <div className="flex gap-2">
+                <button onClick={() => setBatchSelection(templates.map(t => t.id))} className="text-[10px] text-yellow-500 underline uppercase font-bold">Zaznacz All</button>
+                <button onClick={() => setBatchSelection([])} className="text-[10px] text-gray-500 underline uppercase font-bold">Odznacz All</button>
               </div>
             </div>
 
-            <h4 className="font-bold text-xs uppercase tracking-widest text-gray-500 mb-2">Wybierz z bazy ({batchSelection.length} zaznaczonych)</h4>
             <div className="flex-1 overflow-y-auto bg-black/30 border border-gray-800 rounded-xl p-2 space-y-1 mb-4 custom-scrollbar">
-              {templates.length === 0 && <p className="text-gray-600 text-xs p-4 text-center">Baza jest pusta. Dodaj szablony najpierw.</p>}
-              {templates.map(t => (
-                <label key={t.id} className="flex items-center gap-3 p-3 hover:bg-gray-900/50 rounded-lg cursor-pointer transition">
-                  <input type="checkbox" checked={batchSelection.includes(t.id)} onChange={() => toggleBatchSelection(t.id)} className="w-5 h-5 accent-yellow-500 rounded bg-black border-gray-700" />
-                  <span className="font-bold">{t.name} <span className="text-gray-500 font-normal ml-2">(${t.default_buy_in})</span></span>
-                </label>
-              ))}
+              {templates.length === 0 && <p className="text-gray-600 text-xs p-4 text-center">Baza jest pusta. Ustaw najpierw Szablony Rutyny!</p>}
+              {templates.map(t => {
+                const target = parseFloat(t.target_abi || '1');
+                const mu = parseFloat(t.default_markup || '1');
+                const bi = parseFloat(t.default_buy_in || '0');
+                let estSold = 0;
+                if (bi > 0 && mu > 0) estSold = Math.max(0, Math.min(100, ((bi - target) / (bi * mu)) * 100));
+
+                return (
+                  <label key={t.id} className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition ${batchSelection.includes(t.id) ? 'bg-yellow-500/10 border border-yellow-500/30' : 'hover:bg-gray-900/50 border border-transparent'}`}>
+                    <input type="checkbox" checked={batchSelection.includes(t.id)} onChange={() => toggleBatchSelection(t.id)} className="w-5 h-5 accent-yellow-500 rounded bg-black border-gray-700" />
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-gray-500 font-bold">{t.default_time ? t.default_time.slice(0,5) : 'LIVE'}</span>
+                        <span className="font-bold text-sm text-white">{t.name}</span>
+                      </div>
+                      <div className="text-[10px] text-gray-400 mt-1">
+                        BI: <span className="text-white">${t.default_buy_in}</span> | 
+                        MU: <span className="text-white">{t.default_markup}</span> | 
+                        Cel ABI: <span className="text-yellow-500 font-bold">${t.target_abi}</span>
+                        <span className="ml-2 text-amber-500 font-bold">→ Wystawi: {estSold.toFixed(1)}%</span>
+                      </div>
+                    </div>
+                  </label>
+                )
+              })}
             </div>
 
-            <div className="flex gap-3 pt-2">
-              <button onClick={()=>setShowBatchModal(false)} className="flex-1 bg-gray-800 p-4 rounded-xl font-bold uppercase tracking-widest">Anuluj</button>
-              <button onClick={handleBatchInsert} className="flex-[2] bg-yellow-500 text-black p-4 rounded-xl font-black uppercase tracking-widest hover:scale-[1.02] transition">Wystaw {batchSelection.length} Gier</button>
+            <button onClick={handleBatchInsert} className="w-full bg-yellow-500 text-black p-4 rounded-xl font-black uppercase tracking-widest hover:scale-[1.02] transition">Stwórz {batchSelection.length} Gier</button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL SZABLONÓW / RUTYNY */}
+      {showTemplatesModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
+          <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+            <div className="flex justify-between mb-4"><h3 className="font-black text-xl text-yellow-500 italic uppercase">Baza Rutyny</h3><button onClick={()=>setShowTemplatesModal(false)} className="text-gray-500 hover:text-white">X</button></div>
+            
+            <div className="bg-black/50 p-4 rounded-xl border border-gray-800 mb-6">
+              <h4 className="text-xs text-gray-500 font-bold uppercase mb-2">Dodaj turniej do harmonogramu</h4>
+              <div className="grid grid-cols-12 gap-2 mb-2">
+                <div className="col-span-12 lg:col-span-5"><input placeholder="Nazwa" value={newTemplate.name} onChange={e=>setNewTemplate({...newTemplate,name:e.target.value})} className="w-full p-2 bg-black border border-gray-800 rounded-lg outline-none text-xs" /></div>
+                <div className="col-span-4 lg:col-span-2"><input placeholder="BI $" type="number" step="0.01" value={newTemplate.buyIn} onChange={e=>setNewTemplate({...newTemplate,buyIn:e.target.value})} className="w-full p-2 bg-black border border-gray-800 rounded-lg outline-none text-xs" /></div>
+                <div className="col-span-4 lg:col-span-2"><input placeholder="Godz np. 18:30" type="time" value={newTemplate.time} onChange={e=>setNewTemplate({...newTemplate,time:e.target.value})} className="w-full p-2 bg-black border border-gray-800 rounded-lg outline-none text-xs text-gray-400" /></div>
+                <div className="col-span-4 lg:col-span-3"><button onClick={saveNewTemplate} className="w-full h-full bg-yellow-500 text-black rounded-lg font-bold text-xs uppercase tracking-widest hover:bg-yellow-400">Dodaj</button></div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="flex items-center gap-2 bg-black p-2 rounded-lg border border-gray-800"><span className="text-[10px] text-gray-500 font-bold uppercase">Markup:</span><input type="number" step="0.01" value={newTemplate.markup} onChange={e=>setNewTemplate({...newTemplate,markup:e.target.value})} className="w-full bg-transparent outline-none text-xs font-bold text-white" /></div>
+                <div className="flex items-center gap-2 bg-black p-2 rounded-lg border border-gray-800"><span className="text-[10px] text-gray-500 font-bold uppercase whitespace-nowrap">Target ABI $:</span><input type="number" step="0.01" value={newTemplate.targetAbi} onChange={e=>setNewTemplate({...newTemplate,targetAbi:e.target.value})} className="w-full bg-transparent outline-none text-xs font-bold text-yellow-500" /></div>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
+              {templates.map(t => (
+                <div key={t.id} className="flex justify-between items-center bg-black/30 p-3 rounded-lg border border-gray-800/50 hover:border-gray-700">
+                  <div>
+                    <span className="font-bold text-sm block mb-1">{t.name} <span className="text-gray-500 font-normal">(${t.default_buy_in})</span></span>
+                    <span className="text-[10px] text-gray-500 uppercase font-bold tracking-widest bg-black px-2 py-1 rounded">Godz: {t.default_time ? t.default_time.slice(0,5) : 'Brak'} | MU: {t.default_markup} | ABI: <span className="text-yellow-500">${t.target_abi}</span></span>
+                  </div>
+                  <button onClick={async()=>{await supabase.from('tournament_templates').delete().eq('id', t.id);fetchTemplates()}} className="text-red-500 text-xs font-bold px-3 border border-red-500/20 py-2 rounded-lg hover:bg-red-500/10">Usuń</button>
+                </div>
+              ))}
             </div>
           </div>
         </div>
       )}
 
-      {/* INNE MODALE */}
+      {/* POZOSTAŁE MODALE BEZ ZMIAN */}
       {showAdjModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
           <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-sm"><h3 className="font-black text-xl mb-4 text-blue-400 italic">Korekta Bankrollu</h3>
@@ -386,16 +465,6 @@ export default function PokerDashboard() {
                 <button onClick={handleSettleTournament} className="flex-1 bg-emerald-500 text-black p-3 rounded-xl font-bold uppercase">Rozlicz</button>
               </div>
             </div>
-          </div>
-        </div>
-      )}
-
-      {showTemplatesModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
-          <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-lg">
-            <div className="flex justify-between mb-4"><h3 className="font-black text-yellow-500 italic">Baza Turniejów</h3><button onClick={()=>setShowTemplatesModal(false)}>X</button></div>
-            <div className="flex gap-2 mb-4"><input placeholder="Nazwa" value={newTemplate.name} onChange={e=>setNewTemplate({...newTemplate,name:e.target.value})} className="flex-1 p-2 bg-black/50 border border-gray-800 rounded-lg outline-none" /><input placeholder="BI" type="number" value={newTemplate.buyIn} onChange={e=>setNewTemplate({...newTemplate,buyIn:e.target.value})} className="w-16 p-2 bg-black/50 border border-gray-800 rounded-lg outline-none" /><button onClick={saveNewTemplate} className="bg-yellow-500 text-black px-3 rounded-lg font-bold">Dodaj</button></div>
-            <div className="max-h-64 overflow-y-auto">{templates.map(t => (<div key={t.id} className="flex justify-between p-2 border-b border-gray-800/50"><span className="text-sm">{t.name} (${t.default_buy_in})</span><button onClick={async()=>{await supabase.from('tournament_templates').delete().eq('id', t.id);fetchTemplates()}} className="text-red-500 text-xs font-bold">Usuń</button></div>))}</div>
           </div>
         </div>
       )}
@@ -682,16 +751,16 @@ export default function PokerDashboard() {
                   {/* PRZYCISK MASOWEGO DODAWANIA */}
                   <div className="absolute -top-3 -right-3">
                     <button onClick={() => setShowBatchModal(true)} className="bg-white text-black px-4 py-2 rounded-xl font-black text-xs border-[3px] border-[#050505] shadow-lg hover:scale-105 transition-transform uppercase tracking-widest">
-                      📦 Masowo
+                      🚀 Generuj Sesję
                     </button>
                   </div>
 
                   <h3 className="font-black text-xl mb-4">Dodaj Sesję</h3>
                   <div className="space-y-4">
                     <div>
-                      <div className="flex justify-between text-[10px] mb-1 opacity-60"><label>Nazwa</label><button onClick={() => setShowTemplatesModal(true)}>⚙️ Baza</button></div>
+                      <div className="flex justify-between text-[10px] mb-1 opacity-60"><label>Nazwa</label><button onClick={() => setShowTemplatesModal(true)}>⚙️ Rutyna / Szablony</button></div>
                       <div className="flex bg-black/10 rounded-xl overflow-hidden border border-black/10">
-                        <select onChange={(e) => { const m = templates.find(t => t.name === e.target.value); if(m) setAddForm({ ...addForm, name: m.name, buyIn: m.default_buy_in.toString() }); e.target.value = ""; }} className="w-10 bg-black/20 outline-none text-center appearance-none cursor-pointer hover:bg-black/30"><option value="">▼</option>{templates.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}</select>
+                        <select onChange={(e) => { const m = templates.find(t => t.name === e.target.value); if(m) setAddForm({ ...addForm, name: m.name, buyIn: m.default_buy_in.toString(), markup: m.default_markup?.toString() || '1.0' }); e.target.value = ""; }} className="w-10 bg-black/20 outline-none text-center appearance-none cursor-pointer hover:bg-black/30"><option value="">▼</option>{templates.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}</select>
                         <input type="text" placeholder="..." value={addForm.name} onChange={e => setAddForm({...addForm, name: e.target.value})} className="w-full p-3 bg-transparent outline-none text-sm" />
                       </div>
                     </div>
