@@ -17,17 +17,22 @@ export default function PokerDashboard() {
   const [chartData, setChartData] = useState<any[]>([]);
   const [stats, setStats] = useState({ profit: 0, roi: 0, itm: 0, count: 0 });
   
-  // Zmieniony domyślny fallback
   const [startBankroll, setStartBankroll] = useState(338.17);
   const [timeFilter, setTimeFilter] = useState('all');
 
   const [authForm, setAuthForm] = useState({ email: '', password: '' });
   const [addForm, setAddForm] = useState({ name: '', buyIn: '', markup: '1.0', maxSold: '0', actuallySold: '0', scheduledDate: '' });
+  
   const [editingTourney, setEditingTourney] = useState<any>(null);
   const [showTemplatesModal, setShowTemplatesModal] = useState(false);
   const [newTemplate, setNewTemplate] = useState({ name: '', buyIn: '' });
+  
   const [showAdjModal, setShowAdjModal] = useState(false);
   const [adjForm, setAdjForm] = useState({ amount: '', reason: '' });
+
+  // NOWE: Dedykowany Modal do Rozliczania (Bounty vs Prize)
+  const [settleModal, setSettleModal] = useState<any>(null);
+  const [settleForm, setSettleForm] = useState({ prize: '', bounty: '' });
 
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [chatInput, setChatInput] = useState('');
@@ -83,7 +88,6 @@ export default function PokerDashboard() {
     await fetchData(baseBR);
   };
 
-  // NAPRAWIONE: Obsługa błędów przy zmianie bankrolla
   const handleEditStartBankroll = async () => {
     const val = prompt("Podaj nowy BAZOWY bankroll startowy (od niego będzie liczyć wykres):", startBankroll.toString());
     if (val !== null && !isNaN(Number(val))) {
@@ -136,7 +140,7 @@ export default function PokerDashboard() {
     timeline.forEach((item) => {
       let net = 0;
       let myCost = 0;
-      let isWin = false;
+      let isITM = false;
 
       if (item.type === 'adjustment') {
         net = Number(item.data.amount);
@@ -145,25 +149,29 @@ export default function PokerDashboard() {
         const actSold = Number(t.sold_percent !== null ? t.sold_percent : Number(t.max_sell_percent || 0));
         const kept = 100 - actSold;
         myCost = t.buy_in - (t.buy_in * (actSold / 100) * t.markup);
-        net = t.is_finished ? ((t.winnings * (kept / 100)) - myCost) : 0;
-        isWin = t.winnings > 0;
+        
+        const p = Number(t.prize || 0);
+        const b = Number(t.bounty || 0);
+        const total = p + b;
+
+        net = t.is_finished ? ((total * (kept / 100)) - myCost) : 0;
+        isITM = p > 0; // ITM JEST TYLKO GDY PRIZE > 0
       }
 
       if (item.dateObj.getTime() < cutoff) {
         baselineBR += net; 
       } else {
-        filteredEvents.push({ ...item, preCalcNet: net, myCost, isWin });
+        filteredEvents.push({ ...item, preCalcNet: net, myCost, isITM });
         if(item.type === 'tournament' && item.data.is_finished) {
           justProfit += net;
           finishedCount++;
           totalMyCost += Math.max(0, myCost);
-          if(isWin) cashed++;
+          if(isITM) cashed++;
         }
       }
     });
 
     let currentBR = baselineBR;
-    
     const processedChart = filteredEvents.map((item, index) => {
       currentBR += item.preCalcNet;
       const dStr = item.dateObj.toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
@@ -196,33 +204,44 @@ export default function PokerDashboard() {
   };
   
   const updateTournament = async () => {
-    await supabase.from('tournaments').update({ name: editingTourney.name, buy_in: parseFloat(editingTourney.buyIn), markup: parseFloat(editingTourney.markup), max_sell_percent: parseFloat(editingTourney.maxSold), sold_percent: parseFloat(editingTourney.actuallySold), scheduled_date: editingTourney.scheduledDate ? new Date(editingTourney.scheduledDate).toISOString() : null }).eq('id', editingTourney.id);
+    const p = parseFloat(editingTourney.prize || '0');
+    const b = parseFloat(editingTourney.bounty || '0');
+    await supabase.from('tournaments').update({ 
+      name: editingTourney.name, buy_in: parseFloat(editingTourney.buyIn), markup: parseFloat(editingTourney.markup), max_sell_percent: parseFloat(editingTourney.maxSold), sold_percent: parseFloat(editingTourney.actuallySold), 
+      scheduled_date: editingTourney.scheduledDate ? new Date(editingTourney.scheduledDate).toISOString() : null,
+      prize: editingTourney.is_finished ? p : 0, bounty: editingTourney.is_finished ? b : 0, winnings: editingTourney.is_finished ? (p + b) : 0
+    }).eq('id', editingTourney.id);
     setEditingTourney(null); fetchData(startBankroll);
   };
   
-  const settleTournament = async (id: string) => {
-    const val = prompt("Ile wygrałeś ŁĄCZNIE? (Jeśli 0, wpisz 0)");
-    if (val !== null) { await supabase.from('tournaments').update({ winnings: parseFloat(val), is_finished: true, live_status: 'normal' }).eq('id', id); fetchData(startBankroll); }
+  // NOWE ROZLICZANIE (MODAL ZAMIAST PROMPTA)
+  const handleSettleTournament = async () => {
+    const p = parseFloat(settleForm.prize || '0');
+    const b = parseFloat(settleForm.bounty || '0');
+    const total = p + b;
+    const { error } = await supabase.from('tournaments').update({ 
+      winnings: total, prize: p, bounty: b, is_finished: true, live_status: 'normal' 
+    }).eq('id', settleModal.id);
+    
+    if (!error) {
+      setSettleModal(null);
+      setSettleForm({ prize: '', bounty: '' });
+      fetchData(startBankroll);
+    } else {
+      alert("Błąd bazy: " + error.message);
+    }
   };
   
   const saveNewTemplate = async () => {
     if(newTemplate.name) { await supabase.from('tournament_templates').insert([{ name: newTemplate.name, default_buy_in: parseFloat(newTemplate.buyIn || '0') }]); setNewTemplate({ name: '', buyIn: '' }); fetchTemplates(); }
   };
   
-  // NAPRAWIONE: Obsługa błędów przy korekcie
   const saveAdjustment = async () => {
     if(adjForm.amount && adjForm.reason) { 
       const { error } = await supabase.from('bankroll_adjustments').insert([{ amount: parseFloat(adjForm.amount), reason: adjForm.reason }]); 
-      if (error) {
-        alert("Błąd zapisu korekty: " + error.message);
-      } else {
-        setShowAdjModal(false); 
-        setAdjForm({ amount: '', reason: '' }); 
-        fetchData(startBankroll); 
-      }
-    } else {
-      alert("Wpisz kwotę i powód!");
-    }
+      if (error) alert("Błąd zapisu korekty: " + error.message);
+      else { setShowAdjModal(false); setAdjForm({ amount: '', reason: '' }); fetchData(startBankroll); }
+    } else alert("Wpisz kwotę i powód!");
   };
 
   const CustomTooltip = ({ active, payload }: any) => {
@@ -253,6 +272,7 @@ export default function PokerDashboard() {
   return (
     <main className="min-h-screen bg-[#050505] text-white p-4 md:p-8 font-sans pb-20">
       
+      {/* MODAL KOREKTY */}
       {showAdjModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
           <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-sm"><h3 className="font-black text-xl mb-4 text-blue-400 italic">Korekta Bankrollu</h3>
@@ -263,6 +283,31 @@ export default function PokerDashboard() {
         </div>
       )}
 
+      {/* MODAL ROZLICZANIA */}
+      {settleModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
+          <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-sm">
+            <h3 className="font-black text-xl mb-1 text-emerald-400 italic">Rozlicz Grę</h3>
+            <p className="text-gray-400 text-xs mb-4 font-bold">{settleModal.name}</p>
+            <div className="space-y-3">
+              <div>
+                <label className="text-[10px] text-gray-500 uppercase font-bold ml-1">Kasa z miejsc (Prize $)</label>
+                <input type="number" step="0.01" placeholder="0.00" value={settleForm.prize} onChange={e=>setSettleForm({...settleForm, prize:e.target.value})} className="w-full p-3 bg-black/50 border border-emerald-900/50 rounded-xl outline-none text-emerald-400 font-bold" />
+              </div>
+              <div>
+                <label className="text-[10px] text-gray-500 uppercase font-bold ml-1">Złapane Bounty ($)</label>
+                <input type="number" step="0.01" placeholder="0.00" value={settleForm.bounty} onChange={e=>setSettleForm({...settleForm, bounty:e.target.value})} className="w-full p-3 bg-black/50 border border-blue-900/50 rounded-xl outline-none text-blue-400 font-bold" />
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button onClick={() => setSettleModal(null)} className="flex-1 bg-gray-800 p-3 rounded-xl font-bold uppercase">Anuluj</button>
+                <button onClick={handleSettleTournament} className="flex-1 bg-emerald-500 text-black p-3 rounded-xl font-bold uppercase">Rozlicz</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL SZABLONÓW */}
       {showTemplatesModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
           <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-lg">
@@ -273,6 +318,7 @@ export default function PokerDashboard() {
         </div>
       )}
 
+      {/* MODAL EDYCJI */}
       {editingTourney && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
           <div className="bg-[#111] border border-yellow-500/30 p-6 rounded-3xl w-full max-w-md">
@@ -280,6 +326,14 @@ export default function PokerDashboard() {
             <input value={editingTourney.name} onChange={e=>setEditingTourney({...editingTourney,name:e.target.value})} className="w-full p-3 bg-black/50 border border-gray-800 rounded-xl mb-2" />
             <div className="grid grid-cols-2 gap-2 mb-2"><input type="number" value={editingTourney.buyIn} onChange={e=>setEditingTourney({...editingTourney,buyIn:e.target.value})} className="p-3 bg-black/50 border border-gray-800 rounded-xl" /><input type="number" step="0.01" value={editingTourney.markup} onChange={e=>setEditingTourney({...editingTourney,markup:e.target.value})} className="p-3 bg-black/50 border border-gray-800 rounded-xl" /></div>
             <div className="grid grid-cols-2 gap-2 mb-2"><div><label className="text-[10px] text-gray-500">Max %</label><input type="number" value={editingTourney.maxSold} onChange={e=>setEditingTourney({...editingTourney,maxSold:e.target.value})} className="w-full p-3 bg-black/50 border border-gray-800 rounded-xl" /></div><div><label className="text-[10px] text-yellow-500">Sprzedano %</label><input type="number" value={editingTourney.actuallySold} onChange={e=>setEditingTourney({...editingTourney,actuallySold:e.target.value})} className="w-full p-3 bg-black/50 border border-yellow-500/50 text-yellow-500 rounded-xl" /></div></div>
+            
+            {editingTourney.is_finished && (
+              <div className="grid grid-cols-2 gap-2 mb-2 mt-4 p-3 border border-gray-800 rounded-xl bg-[#0a0a0a]">
+                <div><label className="text-[10px] text-emerald-500">Prize $</label><input type="number" value={editingTourney.prize || 0} onChange={e=>setEditingTourney({...editingTourney,prize:e.target.value})} className="w-full p-2 bg-black/50 border border-emerald-900/50 text-emerald-400 rounded-lg outline-none" /></div>
+                <div><label className="text-[10px] text-blue-500">Bounty $</label><input type="number" value={editingTourney.bounty || 0} onChange={e=>setEditingTourney({...editingTourney,bounty:e.target.value})} className="w-full p-2 bg-black/50 border border-blue-900/50 text-blue-400 rounded-lg outline-none" /></div>
+              </div>
+            )}
+
             <input type="datetime-local" value={editingTourney.scheduledDate} onChange={e=>setEditingTourney({...editingTourney,scheduledDate:e.target.value})} className="w-full p-3 bg-black/50 border border-gray-800 rounded-xl mb-4 text-sm" />
             <div className="flex gap-2"><button onClick={()=>setEditingTourney(null)} className="flex-1 bg-gray-800 p-3 rounded-xl font-bold">Anuluj</button><button onClick={updateTournament} className="flex-1 bg-yellow-500 text-black p-3 rounded-xl font-bold">Zapisz</button></div>
           </div>
@@ -304,7 +358,12 @@ export default function PokerDashboard() {
               Bankroll
               {isAdmin && <button onClick={()=>setShowAdjModal(true)} className="text-blue-500 text-[10px] border border-blue-500/30 rounded px-1 hover:bg-blue-500/10">➕ Korekta</button>}
             </p>
-            <p className="text-2xl font-black">${(startBankroll + rawTimeline.reduce((sum, item)=>{if(item.type==='adjustment')return sum+Number(item.data.amount); const t=item.data; return sum+(t.is_finished?((t.winnings*(1-Number(t.sold_percent!==null?t.sold_percent:t.max_sell_percent)/100))-(t.buy_in-(t.buy_in*(Number(t.sold_percent!==null?t.sold_percent:t.max_sell_percent)/100)*t.markup))):0);},0)).toFixed(2)}</p>
+            <p className="text-2xl font-black">${(startBankroll + rawTimeline.reduce((sum, item)=>{
+              if(item.type==='adjustment') return sum+Number(item.data.amount); 
+              const t=item.data; 
+              const p = Number(t.prize || 0); const b = Number(t.bounty || 0);
+              return sum+(t.is_finished?(((p+b)*(1-Number(t.sold_percent!==null?t.sold_percent:t.max_sell_percent)/100))-(t.buy_in-(t.buy_in*(Number(t.sold_percent!==null?t.sold_percent:t.max_sell_percent)/100)*t.markup))):0);
+              },0)).toFixed(2)}</p>
             <p className="text-[9px] text-gray-600 mt-1 flex justify-center items-center gap-1">Start: ${startBankroll.toFixed(2)} {isAdmin && <button onClick={handleEditStartBankroll} className="text-yellow-500 hover:text-yellow-400 text-xs">✏️</button>}</p>
           </div>
         </div>
@@ -343,8 +402,12 @@ export default function PokerDashboard() {
                 const maxSold = Number(t.max_sell_percent || 0);
                 const actSold = Number(t.sold_percent !== null ? t.sold_percent : maxSold);
                 const kept = 100 - actSold;
+                
+                const p = Number(t.prize || 0);
+                const b = Number(t.bounty || 0);
+                
                 const myC = t.buy_in - (t.buy_in * (actSold / 100) * t.markup);
-                const net = t.is_finished ? ((t.winnings * (kept / 100)) - myC) : 0;
+                const net = t.is_finished ? (((p + b) * (kept / 100)) - myC) : 0;
                 
                 const schedDate = t.scheduled_date ? new Date(t.scheduled_date) : null;
                 const isInc = !t.is_finished && schedDate && schedDate > new Date();
@@ -355,13 +418,24 @@ export default function PokerDashboard() {
                 let statusBadge = null;
 
                 if (t.is_finished) {
-                  if (t.winnings > 0) {
+                  const isITM = p > 0;
+                  const gotBounty = b > 0;
+
+                  if (isITM) {
                     if (net > 0) {
                       boxStyle = "bg-emerald-950/20 border-emerald-900/50";
                       statusBadge = <span className="text-[12px] font-black text-emerald-400 uppercase tracking-widest">ITM! (+${net.toFixed(2)})</span>;
                     } else {
                       boxStyle = "bg-[#1a1111] border-red-900/30";
                       statusBadge = <span className="text-[12px] font-bold text-red-400 uppercase tracking-widest">CASHED (-${Math.abs(net).toFixed(2)})</span>;
+                    }
+                  } else if (gotBounty) {
+                    if (net > 0) {
+                      boxStyle = "bg-sky-950/20 border-sky-900/50";
+                      statusBadge = <span className="text-[12px] font-black text-blue-400 uppercase tracking-widest">PROFIT! (+${net.toFixed(2)})</span>;
+                    } else {
+                      boxStyle = "bg-[#1a1111] border-red-900/30";
+                      statusBadge = <span className="text-[12px] font-bold text-blue-400 uppercase tracking-widest">BOUNTY (-${Math.abs(net).toFixed(2)})</span>;
                     }
                   } else {
                     boxStyle = "bg-[#0a0a0a] border-gray-900 opacity-60";
@@ -387,13 +461,21 @@ export default function PokerDashboard() {
                     <div className="italic">
                       <span className="text-[10px] text-gray-500 font-bold uppercase">{schedDate ? schedDate.toLocaleString('pl-PL', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}) : 'LIVE'}</span>
                       <h4 className="font-bold text-gray-200 mt-1">{t.name}</h4>
+                      
                       <div className="mt-1">
                         <p className="text-[11px] text-gray-500 mb-1">BI: ${t.buy_in} | MU: {t.markup} {isAdmin && <span className="text-yellow-500 font-bold ml-1">| Ty: {kept}%</span>}</p>
+                        
+                        {t.is_finished && (p > 0 || b > 0) && (
+                          <p className="text-[10px] text-gray-400 mb-1 font-bold">
+                            Wynik: {p > 0 && <span className="text-emerald-400">Pula: ${p.toFixed(2)}</span>} {p > 0 && b > 0 && "| "} {b > 0 && <span className="text-blue-400">Bounty: ${b.toFixed(2)}</span>}
+                          </p>
+                        )}
+
                         {!t.is_finished && actSold < maxSold ? (
                           <p className="text-[13px] font-black text-amber-400 uppercase tracking-wide">{actSold}% OUT OF {maxSold}% SOLD</p>
-                        ) : (
+                        ) : !t.is_finished ? (
                           <p className="text-[10px] font-bold text-gray-600 uppercase tracking-widest">SOLD ({actSold}%)</p>
-                        )}
+                        ) : null}
                       </div>
                     </div>
                     <div className="flex items-center gap-4 italic">
@@ -403,10 +485,10 @@ export default function PokerDashboard() {
                           {!t.is_finished && (
                             <>
                               <button onClick={() => toggleDeepRun(t.id, t.live_status)} className="bg-red-900/30 text-red-500 text-[10px] px-2 py-1 rounded">🔥</button>
-                              <button onClick={() => settleTournament(t.id)} className="bg-white text-black text-[10px] font-bold px-2 py-1 rounded uppercase">Ok</button>
+                              <button onClick={() => { setSettleModal(t); setSettleForm({ prize: '', bounty: '' }); }} className="bg-white text-black text-[10px] font-bold px-2 py-1 rounded uppercase">Ok</button>
                             </>
                           )}
-                          <button onClick={() => { let d = t.scheduled_date ? new Date(t.scheduled_date) : new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); setEditingTourney({...t, maxSold, actuallySold: actSold, scheduledDate: d.toISOString().slice(0,16)}); }} className="bg-gray-800 text-[10px] px-2 py-1 rounded">⚙️</button>
+                          <button onClick={() => { let d = t.scheduled_date ? new Date(t.scheduled_date) : new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); setEditingTourney({...t, maxSold, actuallySold: actSold, scheduledDate: d.toISOString().slice(0,16), prize: p, bounty: b}); }} className="bg-gray-800 text-[10px] px-2 py-1 rounded">⚙️</button>
                         </div>
                       )}
                     </div>
@@ -418,7 +500,6 @@ export default function PokerDashboard() {
 
           {/* SIDEBAR: SHOUTBOX + DODAWANIE */}
           <div className="space-y-6">
-            
             <div className="bg-[#0a0a0a] border border-gray-800 p-4 rounded-3xl flex flex-col h-[400px]">
               <h3 className="font-black text-sm text-yellow-500 uppercase italic mb-3">💬 Rail / Shoutbox</h3>
               <div className="flex-1 overflow-y-auto space-y-3 pr-2 mb-3 custom-scrollbar flex flex-col-reverse">
