@@ -37,7 +37,6 @@ export default function PokerDashboard() {
   const [chatInput, setChatInput] = useState('');
   const [chatNick, setChatNick] = useState('');
 
-  // NOWE: Stany Kalkulatora ABI
   const [abiTarget, setAbiTarget] = useState('1.00');
   const [abiBi, setAbiBi] = useState('');
   const [abiMu, setAbiMu] = useState('1.0');
@@ -52,8 +51,25 @@ export default function PokerDashboard() {
     };
     initialize();
     
-    const chatInterval = setInterval(fetchChat, 10000);
-    return () => clearInterval(chatInterval);
+    // 🔥 MAGIA REAL-TIME SUPABASE 🔥
+    const channel = supabase.channel('public-tracker')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tournaments' }, () => {
+        loadInitialData(); // Odśwież wykres i listę u wszystkich!
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bankroll_adjustments' }, () => {
+        loadInitialData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, () => {
+        loadInitialData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'shoutbox' }, () => {
+        fetchChat(); // Odśwież czat natychmiast u wszystkich!
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   useEffect(() => {
@@ -76,7 +92,6 @@ export default function PokerDashboard() {
     const nick = chatNick.trim() || 'Kibic';
     await supabase.from('shoutbox').insert([{ nickname: nick, message: chatInput }]);
     setChatInput('');
-    fetchChat();
   };
 
   const fetchTemplates = async () => {
@@ -93,16 +108,11 @@ export default function PokerDashboard() {
   };
 
   const handleEditStartBankroll = async () => {
-    const val = prompt("Podaj nowy BAZOWY bankroll startowy (od niego będzie liczyć wykres):", startBankroll.toString());
+    const val = prompt("Podaj nowy BAZOWY bankroll startowy:", startBankroll.toString());
     if (val !== null && !isNaN(Number(val))) {
       const num = parseFloat(Number(val).toFixed(2));
       const { error } = await supabase.from('settings').upsert({ id: 'start_bankroll', value: num });
-      if (error) {
-        alert("Błąd bazy danych przy zmianie bankrolla: " + error.message);
-      } else {
-        setStartBankroll(num);
-        fetchData(num);
-      }
+      if (error) alert("Błąd: " + error.message);
     }
   };
 
@@ -198,13 +208,12 @@ export default function PokerDashboard() {
   const toggleDeepRun = async (id: string, currentStatus: string) => {
     const newStatus = currentStatus === 'deep_run' ? 'normal' : 'deep_run';
     await supabase.from('tournaments').update({ live_status: newStatus }).eq('id', id);
-    fetchData(startBankroll);
   };
 
   const addTournament = async () => {
     if (!addForm.name || !addForm.buyIn) return alert("Podaj nazwę!");
     await supabase.from('tournaments').insert([{ name: addForm.name, buy_in: parseFloat(addForm.buyIn), markup: parseFloat(addForm.markup), max_sell_percent: parseFloat(addForm.maxSold), sold_percent: parseFloat(addForm.actuallySold), scheduled_date: addForm.scheduledDate ? new Date(addForm.scheduledDate).toISOString() : null, is_finished: false }]);
-    setAddForm({ name: '', buyIn: '', markup: '1.0', maxSold: '0', actuallySold: '0', scheduledDate: '' }); fetchData(startBankroll);
+    setAddForm({ name: '', buyIn: '', markup: '1.0', maxSold: '0', actuallySold: '0', scheduledDate: '' });
   };
   
   const updateTournament = async () => {
@@ -215,7 +224,7 @@ export default function PokerDashboard() {
       scheduled_date: editingTourney.scheduledDate ? new Date(editingTourney.scheduledDate).toISOString() : null,
       prize: editingTourney.is_finished ? p : 0, bounty: editingTourney.is_finished ? b : 0, winnings: editingTourney.is_finished ? (p + b) : 0
     }).eq('id', editingTourney.id);
-    setEditingTourney(null); fetchData(startBankroll);
+    setEditingTourney(null);
   };
   
   const handleSettleTournament = async () => {
@@ -229,7 +238,6 @@ export default function PokerDashboard() {
     if (!error) {
       setSettleModal(null);
       setSettleForm({ prize: '', bounty: '' });
-      fetchData(startBankroll);
     } else {
       alert("Błąd bazy: " + error.message);
     }
@@ -238,23 +246,25 @@ export default function PokerDashboard() {
   const deleteTournament = async (id: string) => {
     if (confirm("Na pewno usunąć?")) { 
       await supabase.from('tournaments').delete().eq('id', id); 
-      fetchData(startBankroll); 
     }
   };
   
   const saveNewTemplate = async () => {
-    if(newTemplate.name) { await supabase.from('tournament_templates').insert([{ name: newTemplate.name, default_buy_in: parseFloat(newTemplate.buyIn || '0') }]); setNewTemplate({ name: '', buyIn: '' }); fetchTemplates(); }
+    if(newTemplate.name) { 
+      await supabase.from('tournament_templates').insert([{ name: newTemplate.name, default_buy_in: parseFloat(newTemplate.buyIn || '0') }]); 
+      setNewTemplate({ name: '', buyIn: '' }); 
+      fetchTemplates(); 
+    }
   };
   
   const saveAdjustment = async () => {
     if(adjForm.amount && adjForm.reason) { 
       const { error } = await supabase.from('bankroll_adjustments').insert([{ amount: parseFloat(adjForm.amount), reason: adjForm.reason }]); 
-      if (error) alert("Błąd zapisu korekty: " + error.message);
-      else { setShowAdjModal(false); setAdjForm({ amount: '', reason: '' }); fetchData(startBankroll); }
+      if (error) alert("Błąd: " + error.message);
+      else { setShowAdjModal(false); setAdjForm({ amount: '', reason: '' }); }
     } else alert("Wpisz kwotę i powód!");
   };
 
-  // Funkcja wyliczająca ABI
   const calculateAbiSold = () => {
     const target = parseFloat(abiTarget) || 0;
     const bi = parseFloat(abiBi) || 0;
@@ -266,13 +276,7 @@ export default function PokerDashboard() {
   const abiResult = calculateAbiSold();
 
   const handleCopyAbiToForm = () => {
-    setAddForm({
-      ...addForm,
-      buyIn: abiBi,
-      markup: abiMu,
-      maxSold: abiResult.toFixed(1),
-      actuallySold: '0'
-    });
+    setAddForm({ ...addForm, buyIn: abiBi, markup: abiMu, maxSold: abiResult.toFixed(1), actuallySold: '0' });
   };
 
   const CustomTooltip = ({ active, payload }: any) => {
@@ -298,12 +302,9 @@ export default function PokerDashboard() {
     return <div className="min-h-screen bg-[#050505] text-yellow-500 flex items-center justify-center font-black uppercase tracking-widest text-xl animate-pulse">Ładowanie kokpitu... 🚀</div>;
   }
 
-  const activeOffersCount = tournaments.filter(t => !t.is_finished && Number(t.sold_percent !== null ? t.sold_percent : t.max_sell_percent) < Number(t.max_sell_percent || 0)).length;
-
   return (
     <main className="min-h-screen bg-[#050505] text-white p-4 md:p-8 font-sans pb-20">
       
-      {/* MODAL KOREKTY */}
       {showAdjModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
           <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-sm"><h3 className="font-black text-xl mb-4 text-blue-400 italic">Korekta Bankrollu</h3>
@@ -314,7 +315,6 @@ export default function PokerDashboard() {
         </div>
       )}
 
-      {/* MODAL ROZLICZANIA */}
       {settleModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
           <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-sm">
@@ -338,7 +338,6 @@ export default function PokerDashboard() {
         </div>
       )}
 
-      {/* MODAL SZABLONÓW */}
       {showTemplatesModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
           <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-lg">
@@ -349,7 +348,6 @@ export default function PokerDashboard() {
         </div>
       )}
 
-      {/* MODAL EDYCJI */}
       {editingTourney && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
           <div className="bg-[#111] border border-yellow-500/30 p-6 rounded-3xl w-full max-w-md">
