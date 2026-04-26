@@ -31,7 +31,6 @@ export default function PokerDashboard() {
   const [showTemplatesModal, setShowTemplatesModal] = useState(false);
   const [newTemplate, setNewTemplate] = useState({ name: '', buyIn: '', markup: '1.0', targetAbi: '1.0', time: '' });
   
-  // NOWE STANY DLA EDYCJI SZABLONÓW
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const [editTemplateForm, setEditTemplateForm] = useState({ name: '', buyIn: '', markup: '', targetAbi: '', time: '' });
 
@@ -103,7 +102,6 @@ export default function PokerDashboard() {
   const fetchTemplates = async () => {
     const { data } = await supabase.from('tournament_templates').select('*');
     if (data) {
-      // INTELIGENTNE SORTOWANIE (Chronologicznie, potem te bez godziny na dół alfabetycznie)
       const sortedData = data.sort((a, b) => {
         if (a.default_time && b.default_time) return a.default_time.localeCompare(b.default_time);
         if (a.default_time && !b.default_time) return -1;
@@ -296,7 +294,6 @@ export default function PokerDashboard() {
     }
   };
 
-  // Zapisywanie edycji istniejącego szablonu
   const saveEditedTemplate = async (id: string) => {
     await supabase.from('tournament_templates').update({
       name: editTemplateForm.name,
@@ -367,7 +364,6 @@ export default function PokerDashboard() {
   return (
     <main className="min-h-screen bg-[#050505] text-white p-4 md:p-8 font-sans pb-20">
       
-      {/* 🚀 KREATOR SESJI / RUTYNA */}
       {showBatchModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
           <div className="bg-[#111] border border-yellow-500/30 p-6 rounded-3xl w-full max-w-2xl flex flex-col max-h-[90vh]">
@@ -482,7 +478,6 @@ export default function PokerDashboard() {
         </div>
       )}
 
-      {/* POZOSTAŁE MODALE BEZ ZMIAN */}
       {showAdjModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
           <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-sm"><h3 className="font-black text-xl mb-4 text-blue-400 italic">Korekta Bankrollu</h3>
@@ -806,7 +801,11 @@ export default function PokerDashboard() {
                     <div>
                       <div className="flex justify-between text-[10px] mb-1 opacity-60"><label>Nazwa</label><button onClick={() => setShowTemplatesModal(true)}>⚙️ Rutyna / Szablony</button></div>
                       <div className="flex bg-black/10 rounded-xl overflow-hidden border border-black/10">
-                        <select onChange={(e) => { const m = templates.find(t => t.name === e.target.value); if(m) setAddForm({ ...addForm, name: m.name, buyIn: m.default_buy_in.toString(), markup: m.default_markup?.toString() || '1.0' }); e.target.value = ""; }} className="w-10 bg-black/20 outline-none text-center appearance-none cursor-pointer hover:bg-black/30"><option value="">▼</option>{templates.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}</select>
+                        {/* UPDATE: Wczytujemy z ID zamiast NAME, zeby poprawnie wybieralo turnieje z ta sama nazwa */}
+                        <select onChange={(e) => { const m = templates.find(t => t.id === e.target.value); if(m) setAddForm({ ...addForm, name: m.name, buyIn: m.default_buy_in.toString(), markup: m.default_markup?.toString() || '1.0' }); e.target.value = ""; }} className="w-10 bg-black/20 outline-none text-center appearance-none cursor-pointer hover:bg-black/30">
+                          <option value="">▼</option>
+                          {templates.map(t => <option key={t.id} value={t.id}>{t.name} {t.default_time ? `[${t.default_time.slice(0,5)}]` : ''}</option>)}
+                        </select>
                         <input type="text" placeholder="..." value={addForm.name} onChange={e => setAddForm({...addForm, name: e.target.value})} className="w-full p-3 bg-transparent outline-none text-sm" />
                       </div>
                     </div>
