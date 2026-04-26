@@ -37,6 +37,11 @@ export default function PokerDashboard() {
   const [chatInput, setChatInput] = useState('');
   const [chatNick, setChatNick] = useState('');
 
+  // NOWE: Stany Kalkulatora ABI
+  const [abiTarget, setAbiTarget] = useState('1.00');
+  const [abiBi, setAbiBi] = useState('');
+  const [abiMu, setAbiMu] = useState('1.0');
+
   useEffect(() => {
     const initialize = async () => {
       await checkUser();
@@ -247,6 +252,27 @@ export default function PokerDashboard() {
       if (error) alert("Błąd zapisu korekty: " + error.message);
       else { setShowAdjModal(false); setAdjForm({ amount: '', reason: '' }); fetchData(startBankroll); }
     } else alert("Wpisz kwotę i powód!");
+  };
+
+  // Funkcja wyliczająca ABI
+  const calculateAbiSold = () => {
+    const target = parseFloat(abiTarget) || 0;
+    const bi = parseFloat(abiBi) || 0;
+    const mu = parseFloat(abiMu) || 1;
+    if (bi <= target || bi === 0 || mu === 0) return 0;
+    let res = ((bi - target) / (bi * mu)) * 100;
+    return res > 100 ? 100 : res;
+  };
+  const abiResult = calculateAbiSold();
+
+  const handleCopyAbiToForm = () => {
+    setAddForm({
+      ...addForm,
+      buyIn: abiBi,
+      markup: abiMu,
+      maxSold: abiResult.toFixed(1),
+      actuallySold: '0'
+    });
   };
 
   const CustomTooltip = ({ active, payload }: any) => {
@@ -495,7 +521,6 @@ export default function PokerDashboard() {
                           )}
                           <button onClick={() => { let d = t.scheduled_date ? new Date(t.scheduled_date) : new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); setEditingTourney({...t, maxSold, actuallySold: actSold, scheduledDate: d.toISOString().slice(0,16), prize: p, bounty: b}); }} className="bg-gray-800 text-[10px] px-2 py-1 rounded">⚙️</button>
                           
-                          {/* TUTAJ WROCIŁ PRZYCISK USUWANIA (X) */}
                           <button onClick={() => deleteTournament(t.id)} className="text-red-500 font-bold px-2">X</button>
                         </div>
                       )}
@@ -506,7 +531,7 @@ export default function PokerDashboard() {
             </div>
           </div>
 
-          {/* SIDEBAR: SHOUTBOX + DODAWANIE */}
+          {/* SIDEBAR: SHOUTBOX + KALKULATOR + DODAWANIE */}
           <div className="space-y-6">
             <div className="bg-[#0a0a0a] border border-gray-800 p-4 rounded-3xl flex flex-col h-[400px]">
               <h3 className="font-black text-sm text-yellow-500 uppercase italic mb-3">💬 Rail / Shoutbox</h3>
@@ -532,28 +557,58 @@ export default function PokerDashboard() {
             </div>
 
             {isAdmin && (
-              <div className="bg-yellow-500 p-6 rounded-3xl text-black italic font-bold uppercase shadow-2xl">
-                <h3 className="font-black text-xl mb-4">Dodaj Sesję</h3>
-                <div className="space-y-4">
-                  <div>
-                    <div className="flex justify-between text-[10px] mb-1 opacity-60"><label>Nazwa</label><button onClick={() => setShowTemplatesModal(true)}>⚙️ Baza</button></div>
-                    <div className="flex bg-black/10 rounded-xl overflow-hidden border border-black/10">
-                      <select onChange={(e) => { const m = templates.find(t => t.name === e.target.value); if(m) setAddForm({ ...addForm, name: m.name, buyIn: m.default_buy_in.toString() }); e.target.value = ""; }} className="w-10 bg-black/20 outline-none text-center appearance-none cursor-pointer hover:bg-black/30"><option value="">▼</option>{templates.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}</select>
-                      <input type="text" placeholder="..." value={addForm.name} onChange={e => setAddForm({...addForm, name: e.target.value})} className="w-full p-3 bg-transparent outline-none text-sm" />
+              <>
+                {/* KALKULATOR ABI */}
+                <div className="bg-[#111] border border-gray-800 p-5 rounded-3xl shadow-xl">
+                  <h3 className="font-black text-sm text-yellow-500 uppercase italic mb-3">🧮 Kalkulator ABI</h3>
+                  <div className="grid grid-cols-3 gap-2 mb-3">
+                    <div>
+                      <label className="text-[9px] text-gray-500 uppercase font-bold pl-1">Target ABI $</label>
+                      <input type="number" step="0.01" value={abiTarget} onChange={e=>setAbiTarget(e.target.value)} className="w-full p-2 bg-black/50 border border-gray-800 rounded-lg text-xs outline-none text-white font-bold" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-gray-500 uppercase font-bold pl-1">Buy-in $</label>
+                      <input type="number" step="0.01" placeholder="0" value={abiBi} onChange={e=>setAbiBi(e.target.value)} className="w-full p-2 bg-black/50 border border-gray-800 rounded-lg text-xs outline-none text-white font-bold" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-gray-500 uppercase font-bold pl-1">Markup</label>
+                      <input type="number" step="0.01" value={abiMu} onChange={e=>setAbiMu(e.target.value)} className="w-full p-2 bg-black/50 border border-gray-800 rounded-lg text-xs outline-none text-white font-bold" />
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <input type="number" placeholder="BI $" value={addForm.buyIn} onChange={e => setAddForm({...addForm, buyIn: e.target.value})} className="w-full p-3 rounded-xl bg-black/10 outline-none" />
-                    <input type="number" step="0.01" placeholder="MU" value={addForm.markup} onChange={e => setAddForm({...addForm, markup: e.target.value})} className="w-full p-3 rounded-xl bg-black/10 outline-none" />
+                  
+                  <div className="bg-black/30 border border-gray-800 p-3 rounded-xl flex justify-between items-center mb-2">
+                    <span className="text-xs text-gray-400 font-bold uppercase">Musisz sprzedać:</span>
+                    <span className="text-lg font-black text-amber-400">{abiResult.toFixed(1)}%</span>
                   </div>
-                  <div className="grid grid-cols-2 gap-3 items-end">
-                    <div className="bg-black/10 p-2 rounded-xl text-center"><label className="text-[9px] uppercase font-bold opacity-60 block mb-1">Oferta (Max %)</label><input type="number" value={addForm.maxSold} onChange={e => setAddForm({...addForm, maxSold: e.target.value})} className="w-full bg-transparent text-center font-black outline-none" /></div>
-                    <div className="bg-black p-2 rounded-xl text-center border border-yellow-500"><label className="text-[9px] uppercase font-bold text-yellow-500 block mb-1">Sprzedano %</label><input type="number" value={addForm.actuallySold} onChange={e => setAddForm({...addForm, actuallySold: e.target.value})} className="w-full bg-transparent text-center font-black text-yellow-500 outline-none" /></div>
-                  </div>
-                  <input type="datetime-local" value={addForm.scheduledDate} onChange={e => setAddForm({...addForm, scheduledDate: e.target.value})} className="w-full p-3 rounded-xl bg-black/10 outline-none text-xs" />
-                  <button onClick={addTournament} className="w-full bg-black text-white font-black py-4 rounded-xl tracking-widest">Dodaj</button>
+                  
+                  <button onClick={handleCopyAbiToForm} className="w-full bg-gray-800 hover:bg-gray-700 text-xs py-2 rounded-lg font-bold uppercase transition text-gray-300">
+                    Przenieś do Dodawania ↓
+                  </button>
                 </div>
-              </div>
+
+                <div className="bg-yellow-500 p-6 rounded-3xl text-black italic font-bold uppercase shadow-2xl">
+                  <h3 className="font-black text-xl mb-4">Dodaj Sesję</h3>
+                  <div className="space-y-4">
+                    <div>
+                      <div className="flex justify-between text-[10px] mb-1 opacity-60"><label>Nazwa</label><button onClick={() => setShowTemplatesModal(true)}>⚙️ Baza</button></div>
+                      <div className="flex bg-black/10 rounded-xl overflow-hidden border border-black/10">
+                        <select onChange={(e) => { const m = templates.find(t => t.name === e.target.value); if(m) setAddForm({ ...addForm, name: m.name, buyIn: m.default_buy_in.toString() }); e.target.value = ""; }} className="w-10 bg-black/20 outline-none text-center appearance-none cursor-pointer hover:bg-black/30"><option value="">▼</option>{templates.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}</select>
+                        <input type="text" placeholder="..." value={addForm.name} onChange={e => setAddForm({...addForm, name: e.target.value})} className="w-full p-3 bg-transparent outline-none text-sm" />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <input type="number" placeholder="BI $" value={addForm.buyIn} onChange={e => setAddForm({...addForm, buyIn: e.target.value})} className="w-full p-3 rounded-xl bg-black/10 outline-none" />
+                      <input type="number" step="0.01" placeholder="MU" value={addForm.markup} onChange={e => setAddForm({...addForm, markup: e.target.value})} className="w-full p-3 rounded-xl bg-black/10 outline-none" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 items-end">
+                      <div className="bg-black/10 p-2 rounded-xl text-center"><label className="text-[9px] uppercase font-bold opacity-60 block mb-1">Oferta (Max %)</label><input type="number" value={addForm.maxSold} onChange={e => setAddForm({...addForm, maxSold: e.target.value})} className="w-full bg-transparent text-center font-black outline-none" /></div>
+                      <div className="bg-black p-2 rounded-xl text-center border border-yellow-500"><label className="text-[9px] uppercase font-bold text-yellow-500 block mb-1">Sprzedano %</label><input type="number" value={addForm.actuallySold} onChange={e => setAddForm({...addForm, actuallySold: e.target.value})} className="w-full bg-transparent text-center font-black text-yellow-500 outline-none" /></div>
+                    </div>
+                    <input type="datetime-local" value={addForm.scheduledDate} onChange={e => setAddForm({...addForm, scheduledDate: e.target.value})} className="w-full p-3 rounded-xl bg-black/10 outline-none text-xs" />
+                    <button onClick={addTournament} className="w-full bg-black text-white font-black py-4 rounded-xl tracking-widest hover:scale-[1.02] transition-transform">Dodaj do Bazy</button>
+                  </div>
+                </div>
+              </>
             )}
           </div>
         </div>
