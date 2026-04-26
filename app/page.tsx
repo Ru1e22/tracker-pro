@@ -30,7 +30,6 @@ export default function PokerDashboard() {
   const [showAdjModal, setShowAdjModal] = useState(false);
   const [adjForm, setAdjForm] = useState({ amount: '', reason: '' });
 
-  // NOWE: Dedykowany Modal do Rozliczania (Bounty vs Prize)
   const [settleModal, setSettleModal] = useState<any>(null);
   const [settleForm, setSettleForm] = useState({ prize: '', bounty: '' });
 
@@ -155,7 +154,7 @@ export default function PokerDashboard() {
         const total = p + b;
 
         net = t.is_finished ? ((total * (kept / 100)) - myCost) : 0;
-        isITM = p > 0; // ITM JEST TYLKO GDY PRIZE > 0
+        isITM = p > 0;
       }
 
       if (item.dateObj.getTime() < cutoff) {
@@ -214,7 +213,6 @@ export default function PokerDashboard() {
     setEditingTourney(null); fetchData(startBankroll);
   };
   
-  // NOWE ROZLICZANIE (MODAL ZAMIAST PROMPTA)
   const handleSettleTournament = async () => {
     const p = parseFloat(settleForm.prize || '0');
     const b = parseFloat(settleForm.bounty || '0');
@@ -229,6 +227,13 @@ export default function PokerDashboard() {
       fetchData(startBankroll);
     } else {
       alert("Błąd bazy: " + error.message);
+    }
+  };
+
+  const deleteTournament = async (id: string) => {
+    if (confirm("Na pewno usunąć?")) { 
+      await supabase.from('tournaments').delete().eq('id', id); 
+      fetchData(startBankroll); 
     }
   };
   
@@ -489,6 +494,9 @@ export default function PokerDashboard() {
                             </>
                           )}
                           <button onClick={() => { let d = t.scheduled_date ? new Date(t.scheduled_date) : new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); setEditingTourney({...t, maxSold, actuallySold: actSold, scheduledDate: d.toISOString().slice(0,16), prize: p, bounty: b}); }} className="bg-gray-800 text-[10px] px-2 py-1 rounded">⚙️</button>
+                          
+                          {/* TUTAJ WROCIŁ PRZYCISK USUWANIA (X) */}
+                          <button onClick={() => deleteTournament(t.id)} className="text-red-500 font-bold px-2">X</button>
                         </div>
                       )}
                     </div>
