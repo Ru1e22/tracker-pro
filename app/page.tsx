@@ -13,7 +13,6 @@ export default function PokerDashboard() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [tournaments, setTournaments] = useState<any[]>([]);
   const [templates, setTemplates] = useState<any[]>([]);
-  const [adjustments, setAdjustments] = useState<any[]>([]);
   const [rawTimeline, setRawTimeline] = useState<any[]>([]);
   const [chartData, setChartData] = useState<any[]>([]);
   const [stats, setStats] = useState({ profit: 0, roi: 0, itm: 0, count: 0 });
@@ -76,6 +75,18 @@ export default function PokerDashboard() {
     setIsAdmin(!!session);
   };
 
+  const handleLogin = async () => {
+    const { error } = await supabase.auth.signInWithPassword({
+      email: authForm.email,
+      password: authForm.password
+    });
+    if (!error) {
+      setIsAdmin(true);
+    } else {
+      alert("Błąd logowania: Sprawdź email i hasło!");
+    }
+  };
+
   const fetchChat = async () => {
     const { data } = await supabase.from('shoutbox').select('*').order('created_at', { ascending: false }).limit(30);
     if(data) setChatMessages(data.reverse());
@@ -115,8 +126,6 @@ export default function PokerDashboard() {
     const { data: tData } = await supabase.from('tournaments').select('*');
     const { data: aData } = await supabase.from('bankroll_adjustments').select('*');
     if (!tData) return;
-
-    setAdjustments(aData || []);
 
     const timeline: any[] = [
       ...tData.map(t => ({ type: 'tournament', dateObj: t.scheduled_date ? new Date(t.scheduled_date) : new Date(t.created_at), data: t })),
@@ -258,14 +267,8 @@ export default function PokerDashboard() {
     if(adjForm.amount && adjForm.reason) { 
       const { error } = await supabase.from('bankroll_adjustments').insert([{ amount: parseFloat(adjForm.amount), reason: adjForm.reason }]); 
       if (error) alert("Błąd: " + error.message);
-      else { setAdjForm({ amount: '', reason: '' }); }
+      else { setShowAdjModal(false); setAdjForm({ amount: '', reason: '' }); }
     } else alert("Wpisz kwotę i powód!");
-  };
-
-  const deleteAdjustment = async (id: string) => {
-    if (confirm("Na pewno usunąć tę korektę?")) {
-      await supabase.from('bankroll_adjustments').delete().eq('id', id);
-    }
   };
 
   const updateAbi = (field: 'bi' | 'mu' | 'target' | 'sold', value: string) => {
@@ -340,39 +343,12 @@ export default function PokerDashboard() {
   return (
     <main className="min-h-screen bg-[#050505] text-white p-4 md:p-8 font-sans pb-20">
       
-      {/* MODAL KOREKTY Z HISTORIĄ */}
       {showAdjModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 z-[100]">
-          <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-md">
-            <div className="flex justify-between mb-4">
-              <h3 className="font-black text-xl text-blue-400 italic">Korekta (+/-)</h3>
-              <button onClick={() => setShowAdjModal(false)} className="text-gray-500 hover:text-white">X</button>
-            </div>
-            
-            <div className="space-y-3 mb-6">
-              <input type="number" step="0.01" placeholder="Kwota (np. -50 lub 100)" value={adjForm.amount} onChange={e=>setAdjForm({...adjForm, amount:e.target.value})} className="w-full p-3 bg-black/50 border border-gray-800 rounded-xl outline-none" />
-              <input type="text" placeholder="Powód (np. Wypłata, Bonus)" value={adjForm.reason} onChange={e=>setAdjForm({...adjForm, reason:e.target.value})} className="w-full p-3 bg-black/50 border border-gray-800 rounded-xl outline-none" />
-              <button onClick={saveAdjustment} className="w-full bg-blue-500 text-black p-3 rounded-xl font-bold uppercase tracking-widest hover:bg-blue-400">Dodaj Korektę</button>
-            </div>
-
-            {adjustments.length > 0 && (
-              <div className="border-t border-gray-800 pt-4">
-                <h4 className="font-bold text-xs text-gray-500 uppercase tracking-widest mb-3">Historia Korekt</h4>
-                <div className="max-h-48 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
-                  {adjustments.sort((a,b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map(a => (
-                    <div key={a.id} className="flex justify-between items-center bg-black/30 p-3 rounded-xl border border-gray-800/50">
-                      <div>
-                        <p className={`font-black text-sm ${a.amount >= 0 ? 'text-green-400' : 'text-red-500'}`}>
-                          {a.amount >= 0 ? '+' : ''}{a.amount}
-                        </p>
-                        <p className="text-[10px] text-gray-400">{a.reason}</p>
-                      </div>
-                      <button onClick={() => deleteAdjustment(a.id)} className="text-red-500 text-[10px] font-bold px-2 py-1 uppercase border border-red-500/20 rounded hover:bg-red-500/10 transition">Usuń</button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+          <div className="bg-[#111] border border-gray-800 p-6 rounded-3xl w-full max-w-sm"><h3 className="font-black text-xl mb-4 text-blue-400 italic">Korekta Bankrollu</h3>
+            <input type="number" step="0.01" placeholder="Kwota (np. -50 lub 100)" value={adjForm.amount} onChange={e=>setAdjForm({...adjForm, amount:e.target.value})} className="w-full p-3 bg-black/50 border border-gray-800 rounded-xl mb-2 outline-none" />
+            <input type="text" placeholder="Powód (np. Wypłata, Bonus)" value={adjForm.reason} onChange={e=>setAdjForm({...adjForm, reason:e.target.value})} className="w-full p-3 bg-black/50 border border-gray-800 rounded-xl mb-4 outline-none" />
+            <div className="flex gap-2"><button onClick={()=>setShowAdjModal(false)} className="flex-1 bg-gray-800 p-3 rounded-xl font-bold">Anuluj</button><button onClick={saveAdjustment} className="flex-1 bg-blue-500 text-black p-3 rounded-xl font-bold">Zapisz</button></div>
           </div>
         </div>
       )}
@@ -436,8 +412,12 @@ export default function PokerDashboard() {
         <div className="flex justify-between items-center mb-8">
           <div><h1 className="text-4xl font-black text-yellow-500 italic uppercase">BRTracker</h1><p className="text-gray-500 text-sm italic">Rulezz</p></div>
           {!isAdmin ? (
-            <div className="flex gap-2 bg-gray-900/50 p-2 rounded-xl"><input type="password" placeholder="Hasło" className="bg-transparent text-sm w-24 outline-none" onChange={e=>setAuthForm({...authForm, password:e.target.value})} /><button onClick={async()=>{const {error}=await supabase.auth.signInWithPassword({email:'admin@brtracker.com', password: authForm.password}); if(!error) setIsAdmin(true);}} className="bg-yellow-500 text-black px-3 py-1 rounded font-bold text-xs uppercase">Zaloguj</button></div>
-          ) : <button onClick={()=>supabase.auth.signOut().then(()=>location.reload())} className="text-gray-500 text-xs underline">Wyloguj</button>}
+            <div className="flex gap-2 bg-[#0f0f0f] border border-gray-800 p-2 rounded-xl">
+              <input type="email" placeholder="Email" className="bg-transparent text-sm w-32 outline-none text-white placeholder-gray-600 pl-2" onChange={e=>setAuthForm({...authForm, email:e.target.value})} />
+              <input type="password" placeholder="Hasło" className="bg-transparent text-sm w-24 outline-none text-white placeholder-gray-600 pl-2" onChange={e=>setAuthForm({...authForm, password:e.target.value})} />
+              <button onClick={handleLogin} className="bg-yellow-500 text-black px-3 py-1 rounded-lg font-bold text-xs uppercase hover:bg-yellow-400 transition">Zaloguj</button>
+            </div>
+          ) : <button onClick={()=>supabase.auth.signOut().then(()=>location.reload())} className="text-gray-500 text-xs underline hover:text-white transition">Wyloguj</button>}
         </div>
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8 text-center uppercase italic font-bold">
