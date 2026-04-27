@@ -234,7 +234,6 @@ export default function PokerDashboard() {
       if (bi > 0 && mu > 0) {
         let s = ((bi - target) / (bi * mu)) * 100;
         s = Math.max(0, Math.min(100, s));
-        // 🔥 LOGIKA ZAOKRĄGLANIA: Jeśli BI < 30$, zaokrąglaj do dziesiątek
         if (bi < 30) s = Math.round(s / 10) * 10;
         calcSold = s;
       }
@@ -328,7 +327,6 @@ export default function PokerDashboard() {
       if (bi > 0 && mu > 0) { 
         let s = ((bi - target) / (bi * mu)) * 100; 
         s = Math.max(0, Math.min(100, s));
-        // 🔥 LOGIKA ZAOKRĄGLANIA W KALKULATORZE
         if (bi < 30) s = Math.round(s / 10) * 10;
         setAbiSold(bi < 30 ? s.toString() : s.toFixed(1)); 
       } else setAbiSold('0');
@@ -362,18 +360,42 @@ export default function PokerDashboard() {
 
   const activeOffersCount = tournaments.filter(t => !t.is_finished && Number(t.sold_percent !== null ? t.sold_percent : t.max_sell_percent) < Number(t.max_sell_percent || 0)).length;
   const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  
+  // WYLICZANIE STATYSTYK TYLKO DLA ARCHIWUM
+  let archProfit = 0;
+  let archCost = 0;
+  let archItmCount = 0;
+  let archTotalFinished = 0;
+
   const displayedTournaments = tournaments.filter(t => {
     if (activeTab === 'history') {
       if (!t.is_finished) return false;
       const tDate = t.scheduled_date ? new Date(t.scheduled_date).getTime() : new Date(t.created_at).getTime();
       if (archiveFrom && tDate < new Date(archiveFrom).getTime()) return false;
       if (archiveTo && tDate > new Date(archiveTo + 'T23:59:59').getTime()) return false;
+      
+      // Obliczanie statystyk w locie dla odfiltrowanych
+      const maxSold = Number(t.max_sell_percent || 0);
+      const actSold = Number(t.sold_percent !== null ? t.sold_percent : maxSold);
+      const kept = 100 - actSold;
+      const p = Number(t.prize || 0);
+      const b = Number(t.bounty || 0);
+      const myC = t.buy_in - (t.buy_in * (actSold / 100) * t.markup);
+      
+      archProfit += (((p + b) * (kept / 100)) - myC);
+      archCost += Math.max(0, myC);
+      if (p > 0) archItmCount++;
+      archTotalFinished++;
+
       return true;
     } else {
       if (!t.is_finished) return true;
       return (t.scheduled_date ? new Date(t.scheduled_date) : new Date(t.created_at)) > yesterday;
     }
   });
+
+  const archROI = archCost > 0 ? (archProfit / archCost) * 100 : 0;
+  const archITM = archTotalFinished > 0 ? (archItmCount / archTotalFinished) * 100 : 0;
 
   return (
     <main className="min-h-screen bg-[#050505] text-white p-4 md:p-8 font-sans pb-20">
@@ -566,6 +588,7 @@ export default function PokerDashboard() {
           ) : <button onClick={()=>supabase.auth.signOut().then(()=>location.reload())} className="text-gray-500 text-xs underline hover:text-white transition">Wyloguj</button>}
         </div>
 
+        {/* GŁÓWNE STATYSTYKI WYKRESU */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8 text-center uppercase italic font-bold">
           <div className="bg-[#0f0f0f] border border-gray-800 p-4 rounded-3xl flex flex-col justify-center"><p className="text-[10px] text-gray-500 mb-1">Zysk Okresu</p><p className={`text-2xl font-black ${stats.profit >= 0 ? 'text-green-400' : 'text-red-500'}`}>${stats.profit.toFixed(2)}</p></div>
           <div className="bg-[#0f0f0f] border border-gray-800 p-4 rounded-3xl flex flex-col justify-center"><p className="text-[10px] text-gray-500 mb-1">ROI Okresu</p><p className="text-2xl font-black text-yellow-500">{stats.roi.toFixed(1)}%</p></div>
@@ -614,6 +637,7 @@ export default function PokerDashboard() {
           {/* LISTA TURNIEJÓW */}
           <div className="lg:col-span-2">
             
+            {/* ZAKŁADKI (TABS) */}
             <div className="flex justify-between items-end mb-6 border-b border-gray-800 pb-2">
               <div className="flex gap-6">
                 <button onClick={() => setActiveTab('live')} className={`text-lg font-black uppercase italic transition-colors ${activeTab === 'live' ? 'text-yellow-500 border-b-2 border-yellow-500 pb-2 -mb-[10px]' : 'text-gray-600 hover:text-gray-400'}`}>
@@ -626,16 +650,34 @@ export default function PokerDashboard() {
               {activeTab === 'live' && <span className="text-[10px] text-gray-500 uppercase font-bold tracking-widest bg-gray-900 px-2 py-1 rounded-lg">Dostępne: <span className="text-amber-400">{activeOffersCount}</span></span>}
             </div>
 
+            {/* FILTRY ARCHIWUM ORAZ NOWE DEDYKOWANE STATYSTYKI */}
             {activeTab === 'history' && (
-              <div className="flex flex-wrap gap-4 items-center mb-6 bg-[#0a0a0a] p-3 rounded-xl border border-gray-800 shadow-inner">
-                <span className="text-[10px] text-gray-500 uppercase font-bold tracking-widest">Filtruj daty:</span>
-                <div className="flex gap-2 items-center">
-                  <input type="date" value={archiveFrom} onChange={e=>setArchiveFrom(e.target.value)} className="bg-black border border-gray-800 text-gray-300 text-xs p-2 rounded-lg outline-none" />
-                  <span className="text-gray-600">-</span>
-                  <input type="date" value={archiveTo} onChange={e=>setArchiveTo(e.target.value)} className="bg-black border border-gray-800 text-gray-300 text-xs p-2 rounded-lg outline-none" />
-                  {(archiveFrom || archiveTo) && (
-                    <button onClick={() => { setArchiveFrom(''); setArchiveTo(''); }} className="text-red-500 text-[10px] font-bold px-2 py-1.5 uppercase border border-red-900/30 bg-red-900/10 rounded-lg hover:bg-red-900/30 transition">Reset</button>
-                  )}
+              <div className="mb-6">
+                <div className="flex flex-wrap gap-4 items-center bg-[#0a0a0a] p-3 rounded-xl border border-gray-800 shadow-inner mb-3">
+                  <span className="text-[10px] text-gray-500 uppercase font-bold tracking-widest">Filtruj daty:</span>
+                  <div className="flex gap-2 items-center">
+                    <input type="date" value={archiveFrom} onChange={e=>setArchiveFrom(e.target.value)} className="bg-black border border-gray-800 text-gray-300 text-xs p-2 rounded-lg outline-none" />
+                    <span className="text-gray-600">-</span>
+                    <input type="date" value={archiveTo} onChange={e=>setArchiveTo(e.target.value)} className="bg-black border border-gray-800 text-gray-300 text-xs p-2 rounded-lg outline-none" />
+                    {(archiveFrom || archiveTo) && (
+                      <button onClick={() => { setArchiveFrom(''); setArchiveTo(''); }} className="text-red-500 text-[10px] font-bold px-2 py-1.5 uppercase border border-red-900/30 bg-red-900/10 rounded-lg hover:bg-red-900/30 transition">Reset</button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-3 text-center uppercase italic font-bold">
+                  <div className="bg-[#0f0f0f] border border-gray-800 p-3 rounded-xl">
+                    <p className="text-[9px] text-gray-500 mb-1">Zysk z wyszukiwania</p>
+                    <p className={`text-lg font-black ${archProfit >= 0 ? 'text-emerald-400' : 'text-red-500'}`}>${archProfit.toFixed(2)}</p>
+                  </div>
+                  <div className="bg-[#0f0f0f] border border-gray-800 p-3 rounded-xl">
+                    <p className="text-[9px] text-gray-500 mb-1">ROI z wyszukiwania</p>
+                    <p className="text-lg font-black text-yellow-500">{archROI.toFixed(1)}%</p>
+                  </div>
+                  <div className="bg-[#0f0f0f] border border-gray-800 p-3 rounded-xl">
+                    <p className="text-[9px] text-gray-500 mb-1">ITM z wyszukiwania</p>
+                    <p className="text-lg font-black text-blue-400">{archITM.toFixed(1)}%</p>
+                  </div>
                 </div>
               </div>
             )}
@@ -776,7 +818,6 @@ export default function PokerDashboard() {
 
             {isAdmin && (
               <>
-                {/* KALKULATOR ABI DWUKIERUNKOWY */}
                 <div className="bg-[#111] border border-gray-800 p-5 rounded-3xl shadow-xl">
                   <h3 className="font-black text-sm text-yellow-500 uppercase italic mb-3">🧮 Kalkulator ABI</h3>
                   
