@@ -208,6 +208,27 @@ export default function PokerDashboard() {
     await supabase.from('tournaments').update({ live_status: newStatus }).eq('id', id);
   };
 
+  // 1-CLICK MARK AS SOLD
+  const markOneAsSold = async (t: any) => {
+    await supabase.from('tournaments').update({ sold_percent: t.max_sell_percent }).eq('id', t.id);
+  };
+
+  // BULK MARK ALL AS SOLD
+  const markAllAsSold = async () => {
+    if (!confirm("Na pewno chcesz oznaczyć WSZYSTKIE dostępne oferty jako wyprzedane?")) return;
+    
+    const activeOffers = tournaments.filter(t => !t.is_finished && Number(t.sold_percent !== null ? t.sold_percent : t.max_sell_percent) < Number(t.max_sell_percent || 0));
+    
+    if (activeOffers.length === 0) return alert("Nie ma żadnych aktywnych ofert do wyprzedania.");
+
+    // Update everything simultaneously
+    await Promise.all(activeOffers.map(t => 
+      supabase.from('tournaments').update({ sold_percent: t.max_sell_percent }).eq('id', t.id)
+    ));
+    
+    alert(`Oznaczono ${activeOffers.length} turniejów jako SOLD OUT!`);
+  };
+
   const addTournament = async () => {
     if (!addForm.name || !addForm.buyIn) return alert("Podaj nazwę!");
     await supabase.from('tournaments').insert([{ name: addForm.name, buy_in: parseFloat(addForm.buyIn), markup: parseFloat(addForm.markup), max_sell_percent: parseFloat(addForm.maxSold), sold_percent: parseFloat(addForm.actuallySold), scheduled_date: addForm.scheduledDate ? new Date(addForm.scheduledDate).toISOString() : null, is_finished: false }]);
@@ -361,7 +382,6 @@ export default function PokerDashboard() {
   const activeOffersCount = tournaments.filter(t => !t.is_finished && Number(t.sold_percent !== null ? t.sold_percent : t.max_sell_percent) < Number(t.max_sell_percent || 0)).length;
   const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
   
-  // WYLICZANIE STATYSTYK TYLKO DLA ARCHIWUM
   let archProfit = 0;
   let archCost = 0;
   let archItmCount = 0;
@@ -374,7 +394,6 @@ export default function PokerDashboard() {
       if (archiveFrom && tDate < new Date(archiveFrom).getTime()) return false;
       if (archiveTo && tDate > new Date(archiveTo + 'T23:59:59').getTime()) return false;
       
-      // Obliczanie statystyk w locie dla odfiltrowanych
       const maxSold = Number(t.max_sell_percent || 0);
       const actSold = Number(t.sold_percent !== null ? t.sold_percent : maxSold);
       const kept = 100 - actSold;
@@ -637,15 +656,22 @@ export default function PokerDashboard() {
           {/* LISTA TURNIEJÓW */}
           <div className="lg:col-span-2">
             
-            {/* ZAKŁADKI (TABS) */}
+            {/* ZAKŁADKI (TABS) Z NOWYM PRZYCISKIEM BULK SOLD */}
             <div className="flex justify-between items-end mb-6 border-b border-gray-800 pb-2">
-              <div className="flex gap-6">
+              <div className="flex gap-6 items-center">
                 <button onClick={() => setActiveTab('live')} className={`text-lg font-black uppercase italic transition-colors ${activeTab === 'live' ? 'text-yellow-500 border-b-2 border-yellow-500 pb-2 -mb-[10px]' : 'text-gray-600 hover:text-gray-400'}`}>
                   🔴 Live & Oferty
                 </button>
                 <button onClick={() => setActiveTab('history')} className={`text-lg font-black uppercase italic transition-colors ${activeTab === 'history' ? 'text-yellow-500 border-b-2 border-yellow-500 pb-2 -mb-[10px]' : 'text-gray-600 hover:text-gray-400'}`}>
                   📚 Archiwum
                 </button>
+
+                {/* PRZYCISK ZAMKNIJ WSZYSTKIE OFERTY */}
+                {activeTab === 'live' && isAdmin && activeOffersCount > 0 && (
+                  <button onClick={markAllAsSold} className="ml-4 bg-amber-500/20 text-amber-500 border border-amber-500/50 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-amber-500 hover:text-black transition">
+                    💰 Sold Out All
+                  </button>
+                )}
               </div>
               {activeTab === 'live' && <span className="text-[10px] text-gray-500 uppercase font-bold tracking-widest bg-gray-900 px-2 py-1 rounded-lg">Dostępne: <span className="text-amber-400">{activeOffersCount}</span></span>}
             </div>
@@ -775,6 +801,12 @@ export default function PokerDashboard() {
                         <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                           {!t.is_finished && (
                             <>
+                              {/* NOWY SZYBKI PRZYCISK SOLD DLA JEDNEGO TURNIEJU */}
+                              {actSold < maxSold && (
+                                <button onClick={() => markOneAsSold(t)} className="bg-amber-900/50 text-amber-500 border border-amber-500/30 text-[10px] font-bold px-2 py-1 rounded uppercase tracking-widest hover:bg-amber-500 hover:text-black transition">
+                                  Sold
+                                </button>
+                              )}
                               <button onClick={() => toggleDeepRun(t.id, t.live_status)} className="bg-red-900/30 text-red-500 text-[10px] px-2 py-1 rounded">🔥</button>
                               <button onClick={() => { setSettleModal(t); setSettleForm({ prize: '', bounty: '' }); }} className="bg-white text-black text-[10px] font-bold px-2 py-1 rounded uppercase">Ok</button>
                             </>
